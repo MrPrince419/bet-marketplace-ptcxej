@@ -1,12 +1,13 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { User, Bet, MarketplaceItem } from '../types';
+import { User, Bet, MarketplaceItem, Transaction } from '../types';
 
 const STORAGE_KEYS = {
   USER: 'current_user',
   USERS: 'all_users',
   BETS: 'all_bets',
   MARKETPLACE_ITEMS: 'marketplace_items',
+  TRANSACTIONS: 'all_transactions',
 };
 
 // User storage
@@ -94,6 +95,26 @@ export const getMarketplaceItems = async (): Promise<MarketplaceItem[]> => {
     return itemsString ? JSON.parse(itemsString) : [];
   } catch (error) {
     console.log('Error getting marketplace items:', error);
+    return [];
+  }
+};
+
+// Transactions storage
+export const saveTransactions = async (transactions: Transaction[]): Promise<void> => {
+  try {
+    await AsyncStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(transactions));
+    console.log('Transactions saved successfully');
+  } catch (error) {
+    console.log('Error saving transactions:', error);
+  }
+};
+
+export const getTransactions = async (): Promise<Transaction[]> => {
+  try {
+    const transactionsString = await AsyncStorage.getItem(STORAGE_KEYS.TRANSACTIONS);
+    return transactionsString ? JSON.parse(transactionsString) : [];
+  } catch (error) {
+    console.log('Error getting transactions:', error);
     return [];
   }
 };

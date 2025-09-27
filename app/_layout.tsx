@@ -1,26 +1,27 @@
 
 import { Stack } from 'expo-router';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { Platform } from 'react-native';
-import { useEffect } from 'react';
-import { setupErrorLogging } from '../utils/errorLogger';
+import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { StripeProvider } from '@stripe/stripe-react-native';
+import { STRIPE_PUBLISHABLE_KEY } from '../services/stripeService';
 
 export default function RootLayout() {
-  useEffect(() => {
-    setupErrorLogging();
-  }, []);
-
   return (
-    <SafeAreaProvider>
-      <GestureHandlerRootView style={{ flex: 1 }}>
-        <Stack
-          screenOptions={{
-            headerShown: false,
-            animation: 'default',
-          }}
-        />
-      </GestureHandlerRootView>
-    </SafeAreaProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <StripeProvider publishableKey={STRIPE_PUBLISHABLE_KEY}>
+        <Stack screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="index" />
+          <Stack.Screen name="auth/login" />
+          <Stack.Screen name="auth/register" />
+          <Stack.Screen name="main" />
+          <Stack.Screen name="create-bet" />
+          <Stack.Screen name="create-item" />
+          <Stack.Screen name="bet/[id]" />
+          <Stack.Screen name="item/[id]" />
+          <Stack.Screen name="wallet" />
+        </Stack>
+        <StatusBar style="dark" />
+      </StripeProvider>
+    </GestureHandlerRootView>
   );
 }

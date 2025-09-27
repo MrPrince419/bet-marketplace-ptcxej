@@ -11,148 +11,180 @@ import {
   ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
-import { useAuth } from '../hooks/useAuth';
-import { useBets } from '../hooks/useBets';
 import { commonStyles, colors, buttonStyles } from '../styles/commonStyles';
 import Icon from '../components/Icon';
+import { useBets } from '../hooks/useBets';
+import { useAuth } from '../hooks/useAuth';
+import { router } from 'expo-router';
 
 export default function CreateBetScreen() {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [amount, setAmount] = useState('');
-  const [loading, setLoading] = useState(false);
-  
-  const { authState, updateUserBalance } = useAuth();
-  const { createBet } = useBets();
+  const { authState } = useAuth();
+  const { createBet, loading } = useBets();
 
   const handleCreateBet = async () => {
-    if (!authState.user) {
-      Alert.alert('Error', 'You must be logged in to create a bet');
+    if (!authState.user) return;
+
+    if (!title.trim()) {
+      Alert.alert('Missing Title', 'Please enter a title for your bet');
       return;
     }
 
-    if (!title || !description || !amount) {
-      Alert.alert('Error', 'Please fill in all fields');
+    if (!description.trim()) {
+      Alert.alert('Missing Description', 'Please enter a description for your bet');
       return;
     }
 
     const betAmount = parseFloat(amount);
     if (isNaN(betAmount) || betAmount <= 0) {
-      Alert.alert('Error', 'Please enter a valid amount');
+      Alert.alert('Invalid Amount', 'Please enter a valid bet amount');
+      return;
+    }
+
+    if (betAmount < 1) {
+      Alert.alert('Minimum Bet', 'Minimum bet amount is $1');
+      return;
+    }
+
+    if (betAmount > 10000) {
+      Alert.alert('Maximum Bet', 'Maximum bet amount is $10,000');
       return;
     }
 
     if (betAmount > authState.user.balance) {
-      Alert.alert('Error', 'Insufficient balance');
+      Alert.alert(
+        'Insufficient Funds',
+        `You need $${betAmount} to create this bet. Your current balance is $${authState.user.balance.toFixed(2)}.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Add Funds', onPress: () => router.push('/wallet') },
+        ]
+      );
       return;
     }
 
-    setLoading(true);
-    
-    const success = await createBet(
-      authState.user.id,
-      authState.user.username,
-      title,
-      description,
-      betAmount
-    );
+    Alert.alert(
+      'Create Bet',
+      `Create a bet for $${betAmount}? This amount will be held when someone accepts your bet.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Create',
+          onPress: async () => {
+            const success = await createBet(
+              authState.user!.id,
+              authState.user!.username,
+              title.trim(),
+              description.trim(),
+              betAmount
+            );
 
-    if (success) {
-      // Deduct amount from user balance (escrow)
-      await updateUserBalance(authState.user.balance - betAmount);
-      Alert.alert('Success', 'Bet created successfully!', [
-        { text: 'OK', onPress: () => router.back() }
-      ]);
-    } else {
-      Alert.alert('Error', 'Failed to create bet');
-    }
-    
-    setLoading(false);
+            if (success) {
+              Alert.alert('Success', 'Your bet has been created!', [
+                { text: 'OK', onPress: () => router.back() }
+              ]);
+            } else {
+              Alert.alert('Error', 'Failed to create bet. Please try again.');
+            }
+          },
+        },
+      ]
+    );
   };
 
   return (
     <SafeAreaView style={commonStyles.container}>
+      {/* Header */}
+      <View style={commonStyles.header}>
+        <TouchableOpacity
+          style={commonStyles.backButton}
+          onPress={() => router.back()}
+        >
+          <Icon name="arrow-left" size={24} color={colors.text} />
+        </TouchableOpacity>
+        <Text style={commonStyles.headerTitle}>Create Bet</Text>
+        <View style={{ width: 40 }} />
+      </View>
+
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        <View style={commonStyles.content}>
-          <View style={[commonStyles.row, { marginBottom: 20 }]}>
+        <ScrollView style={commonStyles.content}>
+          {/* Balance Info */}
+          <View style={[commonStyles.card, { marginBottom: 20 }]}>
+            <View style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+            }}>
+              <Text style={commonStyles.text}>Your Balance:</Text>
+              <Text style={[commonStyles.title, { color: colors.primary }]}>
+                ${authState.user?.balance?.toFixed(2) || '0.00'}
+              </Text>
+            </View>
             <TouchableOpacity
-              onPress={() => router.back()}
-              style={{ marginRight: 16 }}
+              style={[buttonStyles.secondary, { marginTop: 12 }]}
+              onPress={() => router.push('/wallet')}
             >
-              <Icon name="arrow-back" size={24} color={colors.text} />
+              <Icon name="plus" size={20} color={colors.primary} />
+              <Text style={buttonStyles.secondaryText}>Add Funds</Text>
             </TouchableOpacity>
-            <Text style={commonStyles.title}>Create Bet</Text>
           </View>
 
-          <ScrollView showsVerticalScrollIndicator={false}>
-            {authState.user && (
-              <View style={[commonStyles.card, { marginBottom: 20 }]}>
-                <Text style={[commonStyles.text, { marginBottom: 8 }]}>
-                  Your Balance: ${authState.user.balance}
-                </Text>
-                <Text style={commonStyles.textSecondary}>
-                  The bet amount will be held in escrow until settled
-                </Text>
-              </View>
-            )}
+          <View style={commonStyles.card}>
+            <Text style={[commonStyles.label, { marginBottom: 8 }]}>
+              Bet Title *
+            </Text>
+            <TextInput
+              style={commonStyles.input}
+              value={title}
+              onChangeText={setTitle}
+              placeholder="e.g., Will it rain tomorrow?"
+              maxLength={100}
+            />
 
-            <View style={{ marginBottom: 16 }}>
-              <Text style={[commonStyles.text, { marginBottom: 8 }]}>Bet Title</Text>
-              <TextInput
-                style={commonStyles.input}
-                value={title}
-                onChangeText={setTitle}
-                placeholder="e.g., Will it rain tomorrow?"
-                multiline={false}
-              />
-            </View>
+            <Text style={[commonStyles.label, { marginBottom: 8, marginTop: 20 }]}>
+              Description *
+            </Text>
+            <TextInput
+              style={[commonStyles.input, { height: 100, textAlignVertical: 'top' }]}
+              value={description}
+              onChangeText={setDescription}
+              placeholder="Describe the bet conditions and how it will be settled..."
+              multiline
+              maxLength={500}
+            />
 
-            <View style={{ marginBottom: 16 }}>
-              <Text style={[commonStyles.text, { marginBottom: 8 }]}>Description</Text>
-              <TextInput
-                style={[commonStyles.input, { height: 100, textAlignVertical: 'top' }]}
-                value={description}
-                onChangeText={setDescription}
-                placeholder="Provide details about the bet conditions and how it will be settled..."
-                multiline={true}
-              />
-            </View>
-
-            <View style={{ marginBottom: 32 }}>
-              <Text style={[commonStyles.text, { marginBottom: 8 }]}>Bet Amount ($)</Text>
-              <TextInput
-                style={commonStyles.input}
-                value={amount}
-                onChangeText={setAmount}
-                placeholder="Enter amount"
-                keyboardType="numeric"
-              />
-            </View>
+            <Text style={[commonStyles.label, { marginBottom: 8, marginTop: 20 }]}>
+              Bet Amount *
+            </Text>
+            <TextInput
+              style={commonStyles.input}
+              value={amount}
+              onChangeText={setAmount}
+              placeholder="Enter amount in USD"
+              keyboardType="numeric"
+            />
+            
+            <Text style={[commonStyles.caption, { marginTop: 8 }]}>
+              Both you and the acceptor will put up this amount. Winner takes all.
+            </Text>
 
             <TouchableOpacity
-              style={[buttonStyles.primary, { marginBottom: 16 }]}
+              style={[buttonStyles.primary, { marginTop: 30 }]}
               onPress={handleCreateBet}
               disabled={loading}
             >
-              <Text style={[buttonStyles.text, buttonStyles.primaryText]}>
-                {loading ? 'Creating Bet...' : 'Create Bet'}
+              <Icon name="plus" size={20} color="white" />
+              <Text style={buttonStyles.primaryText}>
+                {loading ? 'Creating...' : 'Create Bet'}
               </Text>
             </TouchableOpacity>
-
-            <TouchableOpacity
-              style={buttonStyles.secondary}
-              onPress={() => router.back()}
-            >
-              <Text style={[buttonStyles.text, buttonStyles.secondaryText]}>
-                Cancel
-              </Text>
-            </TouchableOpacity>
-          </ScrollView>
-        </View>
+          </View>
+        </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
