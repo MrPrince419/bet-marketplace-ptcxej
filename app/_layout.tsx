@@ -2,8 +2,7 @@
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { StripeProvider } from '@stripe/stripe-react-native';
-import { STRIPE_PUBLISHABLE_KEY } from '../services/stripeService';
+import { StripeProvider, STRIPE_PUBLISHABLE_KEY } from '../services/stripeService';
 
 export default function RootLayout() {
   return (

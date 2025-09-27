@@ -1,10 +1,30 @@
 
-import { StripeProvider, useStripe } from '@stripe/stripe-react-native';
-import { Alert } from 'react-native';
+import { Alert, Platform } from 'react-native';
+
+// Conditional imports for Stripe - only import on native platforms
+let StripeProvider: any;
+let useStripe: any;
+
+if (Platform.OS === 'ios' || Platform.OS === 'android') {
+  const stripe = require('@stripe/stripe-react-native');
+  StripeProvider = stripe.StripeProvider;
+  useStripe = stripe.useStripe;
+} else {
+  // Mock implementations for web
+  StripeProvider = ({ children, publishableKey }: any) => children;
+  useStripe = () => ({
+    initPaymentSheet: async () => ({ error: null }),
+    presentPaymentSheet: async () => ({ error: null }),
+    confirmPayment: async () => ({ error: null }),
+  });
+}
 
 // This would normally come from your backend/environment variables
 // For demo purposes, using Stripe test keys
 export const STRIPE_PUBLISHABLE_KEY = 'pk_test_51234567890abcdef'; // Replace with your actual publishable key
+
+// Export the conditionally imported StripeProvider
+export { StripeProvider };
 
 export interface PaymentIntent {
   id: string;
@@ -68,6 +88,20 @@ export const stripeService: StripePaymentService = {
 
 export const useStripePayment = () => {
   const { initPaymentSheet, presentPaymentSheet, confirmPayment } = useStripe();
+
+  // On web, show alert that payments are not supported
+  if (Platform.OS === 'web') {
+    return {
+      initializePaymentSheet: async (amount: number, currency: string = 'usd') => {
+        Alert.alert('Payment Not Available', 'Stripe payments are not supported on web. Please use the mobile app for payments.');
+        return false;
+      },
+      processPayment: async (): Promise<boolean> => {
+        Alert.alert('Payment Not Available', 'Stripe payments are not supported on web. Please use the mobile app for payments.');
+        return false;
+      },
+    };
+  }
 
   const initializePaymentSheet = async (amount: number, currency: string = 'usd') => {
     try {

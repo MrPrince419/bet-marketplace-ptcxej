@@ -8,6 +8,7 @@ import {
   TextInput,
   Alert,
   RefreshControl,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { commonStyles, colors, buttonStyles } from '../styles/commonStyles';
@@ -154,6 +155,28 @@ export default function WalletScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
       >
+        {/* Web Platform Notice */}
+        {Platform.OS === 'web' && (
+          <View style={[commonStyles.card, { 
+            marginBottom: 20, 
+            backgroundColor: colors.warning + '20',
+            borderColor: colors.warning,
+            borderWidth: 1 
+          }]}>
+            <Text style={[commonStyles.subtitle, { 
+              textAlign: 'center', 
+              color: colors.warning,
+              marginBottom: 10 
+            }]}>
+              Demo Mode (Web)
+            </Text>
+            <Text style={[commonStyles.caption, { textAlign: 'center' }]}>
+              Real payments are not supported on web. All transactions are simulated for demo purposes. 
+              Use the mobile app for actual payments.
+            </Text>
+          </View>
+        )}
+
         {/* Balance Card */}
         <View style={[commonStyles.card, { marginBottom: 20 }]}>
           <Text style={[commonStyles.subtitle, { textAlign: 'center', marginBottom: 10 }]}>

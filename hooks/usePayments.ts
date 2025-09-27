@@ -5,7 +5,7 @@ import { useAuth } from './useAuth';
 import { stripeService, useStripePayment } from '../services/stripeService';
 import { getTransactions, saveTransactions } from '../utils/storage';
 import uuid from 'react-native-uuid';
-import { Alert } from 'react-native';
+import { Alert, Platform } from 'react-native';
 
 export const usePayments = () => {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -85,6 +85,25 @@ export const usePayments = () => {
   const depositFunds = async (amount: number): Promise<boolean> => {
     if (!authState.user) return false;
 
+    // On web, show alert that payments are not supported
+    if (Platform.OS === 'web') {
+      Alert.alert('Payment Not Available', 'Real payments are not supported on web. For demo purposes, we\'ll add the funds directly to your wallet.');
+      
+      // For demo purposes on web, just add the funds directly
+      const transaction = await createTransaction(
+        'deposit',
+        amount,
+        `Demo deposit $${amount} to wallet (web)`
+      );
+      
+      await updateTransactionStatus(transaction.id, 'completed');
+      const newBalance = authState.user.balance + amount;
+      await updateUserBalance(newBalance);
+      
+      Alert.alert('Demo Success', `$${amount} has been added to your wallet! (This is a demo - no real payment was processed)`);
+      return true;
+    }
+
     setLoading(true);
     try {
       // Create pending transaction
@@ -140,7 +159,9 @@ export const usePayments = () => {
       const transaction = await createTransaction(
         'withdrawal',
         amount,
-        `Withdraw $${amount} from wallet`
+        Platform.OS === 'web' 
+          ? `Demo withdraw $${amount} from wallet (web)`
+          : `Withdraw $${amount} from wallet`
       );
 
       // In a real app, you would process the withdrawal through Stripe
@@ -154,7 +175,11 @@ export const usePayments = () => {
       const newBalance = authState.user.balance - amount;
       await updateUserBalance(newBalance);
       
-      Alert.alert('Success', `$${amount} has been withdrawn from your wallet!`);
+      const message = Platform.OS === 'web' 
+        ? `$${amount} has been withdrawn from your wallet! (This is a demo - no real withdrawal was processed)`
+        : `$${amount} has been withdrawn from your wallet!`;
+      
+      Alert.alert('Success', message);
       return true;
     } catch (error) {
       console.log('Error withdrawing funds:', error);
