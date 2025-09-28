@@ -10,16 +10,17 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { useAuth } from '../../hooks/useAuth';
-import { useMarketplace } from '../../hooks/useMarketplace';
+import { MarketplaceItem } from '../../types';
 import { commonStyles, colors, buttonStyles } from '../../styles/commonStyles';
 import Icon from '../../components/Icon';
-import { MarketplaceItem } from '../../types';
+import LoadingSpinner from '../../components/LoadingSpinner';
+import { useAuth } from '../../hooks/useAuth';
+import { useMarketplace } from '../../hooks/useMarketplace';
 
 export default function MarketplaceScreen() {
-  const { authState } = useAuth();
-  const { items, loading, getAvailableItems, getUserItems, loadItems } = useMarketplace();
   const [refreshing, setRefreshing] = useState(false);
+  const { authState } = useAuth();
+  const { items, loading, loadItems } = useMarketplace();
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -27,157 +28,181 @@ export default function MarketplaceScreen() {
     setRefreshing(false);
   };
 
-  const availableItems = getAvailableItems();
-  const userItems = authState.user ? getUserItems(authState.user.id) : [];
-
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString();
+  const formatDate = (dateString: string): string => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffInHours = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60));
+    
+    if (diffInHours < 1) {
+      return 'Just now';
+    } else if (diffInHours < 24) {
+      return `${diffInHours}h ago`;
+    } else {
+      const diffInDays = Math.floor(diffInHours / 24);
+      return `${diffInDays}d ago`;
+    }
   };
 
-  const getHighestBid = (item: MarketplaceItem) => {
-    if (item.bids.length === 0) return null;
+  const getHighestBid = (item: MarketplaceItem): number => {
+    if (item.bids.length === 0) return 0;
     return Math.max(...item.bids.map(bid => bid.amount));
   };
 
-  const renderItemCard = (item: MarketplaceItem, isUserItem: boolean = false) => (
-    <View key={item.id} style={commonStyles.card}>
-      {item.imageUrl && (
-        <Image
-          source={{ uri: item.imageUrl }}
-          style={{
-            width: '100%',
-            height: 200,
-            borderRadius: 8,
-            marginBottom: 12,
-          }}
-          resizeMode="cover"
-        />
-      )}
-      
-      <View style={[commonStyles.row, { marginBottom: 8 }]}>
-        <Text style={[commonStyles.text, { fontWeight: '600', flex: 1 }]}>
-          {item.title}
-        </Text>
-        <View style={{
-          backgroundColor: item.status === 'available' ? colors.success : colors.textSecondary,
-          paddingHorizontal: 8,
-          paddingVertical: 4,
-          borderRadius: 4,
-        }}>
-          <Text style={[commonStyles.textSecondary, { 
-            color: colors.background, 
-            fontSize: 12,
-            fontWeight: '500'
-          }]}>
-            {item.status.toUpperCase()}
-          </Text>
-        </View>
-      </View>
-      
-      <Text style={[commonStyles.textSecondary, { marginBottom: 8 }]}>
-        {item.description}
-      </Text>
-      
-      <View style={[commonStyles.row, { marginBottom: 8 }]}>
-        <Text style={[commonStyles.text, { fontWeight: '600' }]}>
-          ${item.price}
-        </Text>
-        <Text style={commonStyles.textSecondary}>
-          by @{item.sellerUsername}
-        </Text>
-      </View>
-      
-      {item.bids.length > 0 && (
-        <Text style={[commonStyles.textSecondary, { marginBottom: 8 }]}>
-          Highest bid: ${getHighestBid(item)} ({item.bids.length} bids)
-        </Text>
-      )}
-      
-      <Text style={[commonStyles.textSecondary, { fontSize: 12 }]}>
-        Listed: {formatDate(item.createdAt)}
-      </Text>
-      
-      {!isUserItem && item.status === 'available' && authState.user && item.sellerId !== authState.user.id && (
-        <View style={[commonStyles.row, { marginTop: 12, gap: 8 }]}>
-          <TouchableOpacity
-            style={[buttonStyles.secondary, { flex: 1 }]}
-            onPress={() => router.push(`/item/${item.id}?action=bid`)}
-          >
-            <Text style={[buttonStyles.text, buttonStyles.secondaryText]}>
-              Place Bid
+  const getStatusColor = (status: string): string => {
+    switch (status) {
+      case 'available': return colors.success;
+      case 'sold': return colors.textSecondary;
+      case 'reserved': return colors.warning;
+      default: return colors.textSecondary;
+    }
+  };
+
+  const getStatusText = (status: string): string => {
+    switch (status) {
+      case 'available': return 'Available';
+      case 'sold': return 'Sold';
+      case 'reserved': return 'Reserved';
+      default: return status;
+    }
+  };
+
+  const renderItemCard = (item: MarketplaceItem, isUserItem: boolean) => {
+    const highestBid = getHighestBid(item);
+    
+    return (
+      <TouchableOpacity
+        key={item.id}
+        style={commonStyles.card}
+        onPress={() => router.push(`/item/${item.id}`)}
+        activeOpacity={0.7}
+      >
+        {item.imageUrl && (
+          <Image
+            source={{ uri: item.imageUrl }}
+            style={{
+              width: '100%',
+              height: 150,
+              borderRadius: 8,
+              marginBottom: 12,
+            }}
+            resizeMode="cover"
+          />
+        )}
+        
+        <View style={commonStyles.row}>
+          <View style={{ flex: 1 }}>
+            <Text style={[commonStyles.text, { fontWeight: '600', marginBottom: 4 }]}>
+              {item.title}
             </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[buttonStyles.primary, { flex: 1 }]}
-            onPress={() => router.push(`/item/${item.id}?action=buy`)}
-          >
-            <Text style={[buttonStyles.text, buttonStyles.primaryText]}>
-              Buy Now
+            <Text style={[commonStyles.textSecondary, { marginBottom: 8 }]} numberOfLines={2}>
+              {item.description}
             </Text>
-          </TouchableOpacity>
+            <View style={commonStyles.row}>
+              <Text style={[commonStyles.textSecondary, { fontSize: 12 }]}>
+                by {isUserItem ? 'You' : item.sellerUsername}
+              </Text>
+              <Text style={[commonStyles.textSecondary, { fontSize: 12 }]}>
+                {formatDate(item.createdAt)}
+              </Text>
+            </View>
+          </View>
+          
+          <View style={{ alignItems: 'flex-end', marginLeft: 12 }}>
+            <Text style={[commonStyles.text, { fontWeight: '700', fontSize: 18 }]}>
+              ${item.price}
+            </Text>
+            {highestBid > 0 && (
+              <Text style={[commonStyles.textSecondary, { fontSize: 12 }]}>
+                Highest bid: ${highestBid}
+              </Text>
+            )}
+            <View style={{
+              backgroundColor: getStatusColor(item.status),
+              paddingHorizontal: 8,
+              paddingVertical: 4,
+              borderRadius: 12,
+              marginTop: 4,
+            }}>
+              <Text style={{
+                color: colors.background,
+                fontSize: 10,
+                fontWeight: '600',
+              }}>
+                {getStatusText(item.status)}
+              </Text>
+            </View>
+          </View>
         </View>
-      )}
-    </View>
-  );
+      </TouchableOpacity>
+    );
+  };
+
+  if (loading && items.length === 0) {
+    return <LoadingSpinner message="Loading marketplace..." />;
+  }
+
+  const userItems = items.filter(item => item.sellerId === authState.user?.id);
+  const otherItems = items.filter(item => item.sellerId !== authState.user?.id);
 
   return (
-    <SafeAreaView style={commonStyles.container}>
-      <View style={commonStyles.content}>
-        <View style={[commonStyles.row, { marginBottom: 20 }]}>
-          <Text style={commonStyles.title}>Marketplace</Text>
+    <SafeAreaView style={commonStyles.wrapper}>
+      <View style={commonStyles.container}>
+        {/* Header */}
+        <View style={commonStyles.content}>
+          <View style={[commonStyles.row, { marginBottom: 20 }]}>
+            <View>
+              <Text style={commonStyles.title}>Marketplace</Text>
+              <Text style={commonStyles.textSecondary}>
+                Balance: ${authState.user?.balance.toFixed(2) || '0.00'}
+              </Text>
+            </View>
+            <TouchableOpacity onPress={() => router.push('/wallet')}>
+              <Icon name="wallet" size={24} color={colors.text} />
+            </TouchableOpacity>
+          </View>
+
+          {/* Create Item Button */}
           <TouchableOpacity
-            style={[buttonStyles.primary, { paddingHorizontal: 16, paddingVertical: 8 }]}
+            style={[buttonStyles.primary, { marginBottom: 24 }]}
             onPress={() => router.push('/create-item')}
           >
-            <Text style={[buttonStyles.text, buttonStyles.primaryText, { fontSize: 14 }]}>
-              List Item
+            <Text style={[buttonStyles.text, buttonStyles.primaryText]}>
+              List New Item
             </Text>
           </TouchableOpacity>
         </View>
 
         <ScrollView
-          showsVerticalScrollIndicator={false}
+          style={{ flex: 1 }}
+          contentContainerStyle={{ paddingBottom: 100 }}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
           }
         >
-          {authState.user && (
-            <View style={{ marginBottom: 24 }}>
-              <Text style={[commonStyles.subtitle, { marginBottom: 12 }]}>
-                Your Balance: ${authState.user.balance}
-              </Text>
-            </View>
-          )}
-
-          <View style={{ marginBottom: 24 }}>
-            <Text style={[commonStyles.subtitle, { marginBottom: 12 }]}>
-              Your Items ({userItems.length})
-            </Text>
-            {userItems.length === 0 ? (
-              <View style={[commonStyles.card, commonStyles.center, { padding: 40 }]}>
-                <Icon name="bag-outline" size={48} color={colors.textSecondary} />
-                <Text style={[commonStyles.textSecondary, { marginTop: 12 }]}>
-                  You haven&apos;t listed any items yet
+          <View style={commonStyles.content}>
+            {/* Your Items */}
+            {userItems.length > 0 && (
+              <>
+                <Text style={[commonStyles.subtitle, { marginBottom: 16 }]}>
+                  Your Items
                 </Text>
-              </View>
-            ) : (
-              userItems.map(item => renderItemCard(item, true))
+                {userItems.map(item => renderItemCard(item, true))}
+              </>
             )}
-          </View>
 
-          <View>
-            <Text style={[commonStyles.subtitle, { marginBottom: 12 }]}>
-              Available Items ({availableItems.length})
+            {/* Available Items */}
+            <Text style={[commonStyles.subtitle, { marginBottom: 16, marginTop: userItems.length > 0 ? 24 : 0 }]}>
+              Available Items
             </Text>
-            {availableItems.length === 0 ? (
+            {otherItems.length === 0 ? (
               <View style={[commonStyles.card, commonStyles.center, { padding: 40 }]}>
-                <Icon name="storefront-outline" size={48} color={colors.textSecondary} />
-                <Text style={[commonStyles.textSecondary, { marginTop: 12 }]}>
-                  No items available
+                <Icon name="storefront" size={48} color={colors.textSecondary} />
+                <Text style={[commonStyles.textSecondary, { marginTop: 16, textAlign: 'center' }]}>
+                  No items available right now.{'\n'}List the first one!
                 </Text>
               </View>
             ) : (
-              availableItems.map(item => renderItemCard(item))
+              otherItems.map(item => renderItemCard(item, false))
             )}
           </View>
         </ScrollView>

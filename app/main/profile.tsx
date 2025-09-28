@@ -8,25 +8,19 @@ import {
   Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { commonStyles, colors, buttonStyles } from '../../styles/commonStyles';
-import { useAuth } from '../../hooks/useAuth';
-import { useMarketplace } from '../../hooks/useMarketplace';
-import { useBets } from '../../hooks/useBets';
-import { usePayments } from '../../hooks/usePayments';
-import Icon from '../../components/Icon';
 import { router } from 'expo-router';
+import { commonStyles, colors, buttonStyles } from '../../styles/commonStyles';
+import Icon from '../../components/Icon';
+import { useAuth } from '../../hooks/useAuth';
+import { useBets } from '../../hooks/useBets';
+import { useMarketplace } from '../../hooks/useMarketplace';
+import { usePayments } from '../../hooks/usePayments';
 
 export default function ProfileScreen() {
   const { authState, logout } = useAuth();
-  const { items } = useMarketplace();
   const { bets } = useBets();
-  const { getRecentTransactions } = usePayments();
-
-  const userItems = items.filter(item => item.sellerId === authState.user?.id);
-  const userBets = bets.filter(bet => 
-    bet.creatorId === authState.user?.id || bet.acceptorId === authState.user?.id
-  );
-  const recentTransactions = getRecentTransactions();
+  const { items } = useMarketplace();
+  const { transactions } = usePayments();
 
   const handleLogout = () => {
     Alert.alert(
@@ -34,223 +28,187 @@ export default function ProfileScreen() {
       'Are you sure you want to logout?',
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Logout', style: 'destructive', onPress: logout },
+        { 
+          text: 'Logout', 
+          style: 'destructive',
+          onPress: async () => {
+            await logout();
+            router.replace('/auth/login');
+          }
+        },
       ]
     );
   };
 
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-    });
+  const formatDate = (dateString: string): string => {
+    return new Date(dateString).toLocaleDateString();
   };
 
+  const getUserStats = () => {
+    const userBets = bets.filter(bet => 
+      bet.creatorId === authState.user?.id || bet.acceptorId === authState.user?.id
+    );
+    const userItems = items.filter(item => item.sellerId === authState.user?.id);
+    const userTransactions = transactions;
+
+    const settledBets = userBets.filter(bet => bet.status === 'settled');
+    const wonBets = settledBets.filter(bet => bet.winner === authState.user?.id);
+    const soldItems = userItems.filter(item => item.status === 'sold');
+
+    return {
+      totalBets: userBets.length,
+      wonBets: wonBets.length,
+      winRate: settledBets.length > 0 ? Math.round((wonBets.length / settledBets.length) * 100) : 0,
+      totalItems: userItems.length,
+      soldItems: soldItems.length,
+      totalTransactions: userTransactions.length,
+    };
+  };
+
+  const stats = getUserStats();
+
   return (
-    <SafeAreaView style={commonStyles.container}>
-      <ScrollView style={commonStyles.content}>
-        {/* Profile Header */}
-        <View style={[commonStyles.card, { marginBottom: 20 }]}>
-          <View style={{ alignItems: 'center', marginBottom: 20 }}>
-            <View style={{
-              width: 80,
-              height: 80,
-              borderRadius: 40,
-              backgroundColor: colors.primary,
-              alignItems: 'center',
-              justifyContent: 'center',
-              marginBottom: 12,
-            }}>
-              <Text style={{
-                fontSize: 32,
-                fontWeight: 'bold',
-                color: 'white',
-              }}>
-                {authState.user?.username.charAt(0).toUpperCase()}
-              </Text>
-            </View>
-            <Text style={commonStyles.title}>{authState.user?.username}</Text>
-            <Text style={commonStyles.caption}>{authState.user?.email}</Text>
-          </View>
+    <SafeAreaView style={commonStyles.wrapper}>
+      <View style={commonStyles.container}>
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 100 }}>
+          <View style={commonStyles.content}>
+            {/* Header */}
+            <Text style={[commonStyles.title, { marginBottom: 32 }]}>Profile</Text>
 
-          {/* Balance and Wallet Button */}
-          <View style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            backgroundColor: colors.background,
-            padding: 16,
-            borderRadius: 12,
-            marginBottom: 20,
-          }}>
-            <View>
-              <Text style={commonStyles.caption}>Current Balance</Text>
-              <Text style={[commonStyles.title, { color: colors.primary }]}>
-                ${authState.user?.balance?.toFixed(2) || '0.00'}
-              </Text>
-            </View>
-            <TouchableOpacity
-              style={buttonStyles.primary}
-              onPress={() => router.push('/wallet')}
-            >
-              <Icon name="credit-card" size={20} color="white" />
-              <Text style={buttonStyles.primaryText}>Wallet</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Stats */}
-          <View style={{
-            flexDirection: 'row',
-            justifyContent: 'space-around',
-            paddingVertical: 16,
-            borderTopWidth: 1,
-            borderTopColor: colors.border,
-          }}>
-            <View style={{ alignItems: 'center' }}>
-              <Text style={[commonStyles.title, { color: colors.primary }]}>
-                {userBets.length}
-              </Text>
-              <Text style={commonStyles.caption}>Bets</Text>
-            </View>
-            <View style={{ alignItems: 'center' }}>
-              <Text style={[commonStyles.title, { color: colors.primary }]}>
-                {userItems.length}
-              </Text>
-              <Text style={commonStyles.caption}>Items</Text>
-            </View>
-            <View style={{ alignItems: 'center' }}>
-              <Text style={[commonStyles.title, { color: colors.primary }]}>
-                {recentTransactions.length}
-              </Text>
-              <Text style={commonStyles.caption}>Transactions</Text>
-            </View>
-          </View>
-        </View>
-
-        {/* Recent Activity */}
-        <View style={[commonStyles.card, { marginBottom: 20 }]}>
-          <Text style={[commonStyles.subtitle, { marginBottom: 15 }]}>
-            Recent Activity
-          </Text>
-          
-          {/* Recent Bets */}
-          {userBets.slice(0, 3).map((bet) => (
-            <TouchableOpacity
-              key={bet.id}
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                paddingVertical: 12,
-                borderBottomWidth: 1,
-                borderBottomColor: colors.border,
-              }}
-              onPress={() => router.push(`/bet/${bet.id}`)}
-            >
+            {/* User Info Card */}
+            <View style={[commonStyles.card, { alignItems: 'center', padding: 32 }]}>
               <View style={{
-                width: 40,
-                height: 40,
-                borderRadius: 20,
-                backgroundColor: colors.background,
+                width: 80,
+                height: 80,
+                borderRadius: 40,
+                backgroundColor: colors.primary,
                 alignItems: 'center',
                 justifyContent: 'center',
-                marginRight: 12,
+                marginBottom: 16,
               }}>
-                <Icon name="target" size={20} color={colors.primary} />
-              </View>
-              
-              <View style={{ flex: 1 }}>
-                <Text style={commonStyles.text} numberOfLines={1}>
-                  {bet.title}
-                </Text>
-                <Text style={commonStyles.caption}>
-                  {bet.status} • ${bet.amount} • {formatDate(bet.createdAt)}
+                <Text style={{
+                  color: colors.background,
+                  fontSize: 32,
+                  fontWeight: '700',
+                }}>
+                  {authState.user?.username.charAt(0).toUpperCase()}
                 </Text>
               </View>
-              
-              <Icon name="chevron-right" size={20} color={colors.textSecondary} />
-            </TouchableOpacity>
-          ))}
+              <Text style={[commonStyles.subtitle, { marginBottom: 4 }]}>
+                {authState.user?.username}
+              </Text>
+              <Text style={commonStyles.textSecondary}>
+                {authState.user?.email}
+              </Text>
+              <Text style={[commonStyles.textSecondary, { marginTop: 8 }]}>
+                Member since {formatDate(authState.user?.createdAt || '')}
+              </Text>
+            </View>
 
-          {/* Recent Items */}
-          {userItems.slice(0, 3).map((item) => (
+            {/* Balance Card */}
+            <View style={[commonStyles.card, { alignItems: 'center', padding: 24 }]}>
+              <Text style={commonStyles.textSecondary}>Current Balance</Text>
+              <Text style={[commonStyles.title, { fontSize: 32, marginBottom: 16 }]}>
+                ${authState.user?.balance.toFixed(2) || '0.00'}
+              </Text>
+              <TouchableOpacity
+                style={[buttonStyles.secondary, { paddingHorizontal: 32 }]}
+                onPress={() => router.push('/wallet')}
+              >
+                <Text style={[buttonStyles.text, buttonStyles.secondaryText]}>
+                  Manage Wallet
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Stats Cards */}
+            <Text style={[commonStyles.subtitle, { marginBottom: 16 }]}>Statistics</Text>
+            
+            <View style={[commonStyles.row, { marginBottom: 12 }]}>
+              <View style={[commonStyles.card, { flex: 1, marginRight: 6, alignItems: 'center', padding: 20 }]}>
+                <Text style={[commonStyles.title, { fontSize: 24, marginBottom: 4 }]}>
+                  {stats.totalBets}
+                </Text>
+                <Text style={commonStyles.textSecondary}>Total Bets</Text>
+              </View>
+              <View style={[commonStyles.card, { flex: 1, marginLeft: 6, alignItems: 'center', padding: 20 }]}>
+                <Text style={[commonStyles.title, { fontSize: 24, marginBottom: 4 }]}>
+                  {stats.winRate}%
+                </Text>
+                <Text style={commonStyles.textSecondary}>Win Rate</Text>
+              </View>
+            </View>
+
+            <View style={[commonStyles.row, { marginBottom: 24 }]}>
+              <View style={[commonStyles.card, { flex: 1, marginRight: 6, alignItems: 'center', padding: 20 }]}>
+                <Text style={[commonStyles.title, { fontSize: 24, marginBottom: 4 }]}>
+                  {stats.totalItems}
+                </Text>
+                <Text style={commonStyles.textSecondary}>Items Listed</Text>
+              </View>
+              <View style={[commonStyles.card, { flex: 1, marginLeft: 6, alignItems: 'center', padding: 20 }]}>
+                <Text style={[commonStyles.title, { fontSize: 24, marginBottom: 4 }]}>
+                  {stats.soldItems}
+                </Text>
+                <Text style={commonStyles.textSecondary}>Items Sold</Text>
+              </View>
+            </View>
+
+            {/* Action Buttons */}
+            <View style={commonStyles.section}>
+              <TouchableOpacity
+                style={[commonStyles.card, commonStyles.row, { padding: 16 }]}
+                onPress={() => router.push('/wallet')}
+              >
+                <Icon name="wallet" size={24} color={colors.primary} style={{ marginRight: 16 }} />
+                <View style={{ flex: 1 }}>
+                  <Text style={commonStyles.text}>Wallet</Text>
+                  <Text style={commonStyles.textSecondary}>Manage your funds</Text>
+                </View>
+                <Icon name="chevron-forward" size={20} color={colors.textSecondary} />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[commonStyles.card, commonStyles.row, { padding: 16 }]}
+                onPress={() => Alert.alert('Coming Soon', 'Transaction history will be available soon!')}
+              >
+                <Icon name="receipt" size={24} color={colors.primary} style={{ marginRight: 16 }} />
+                <View style={{ flex: 1 }}>
+                  <Text style={commonStyles.text}>Transaction History</Text>
+                  <Text style={commonStyles.textSecondary}>{stats.totalTransactions} transactions</Text>
+                </View>
+                <Icon name="chevron-forward" size={20} color={colors.textSecondary} />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[commonStyles.card, commonStyles.row, { padding: 16 }]}
+                onPress={() => Alert.alert('Coming Soon', 'Settings will be available soon!')}
+              >
+                <Icon name="settings" size={24} color={colors.primary} style={{ marginRight: 16 }} />
+                <View style={{ flex: 1 }}>
+                  <Text style={commonStyles.text}>Settings</Text>
+                  <Text style={commonStyles.textSecondary}>App preferences</Text>
+                </View>
+                <Icon name="chevron-forward" size={20} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Logout Button */}
             <TouchableOpacity
-              key={item.id}
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                paddingVertical: 12,
-                borderBottomWidth: 1,
-                borderBottomColor: colors.border,
-              }}
-              onPress={() => router.push(`/item/${item.id}`)}
-            >
-              <View style={{
-                width: 40,
-                height: 40,
-                borderRadius: 20,
+              style={[buttonStyles.secondary, { 
+                borderColor: colors.error,
                 backgroundColor: colors.background,
-                alignItems: 'center',
-                justifyContent: 'center',
-                marginRight: 12,
-              }}>
-                <Icon name="shopping-bag" size={20} color={colors.success} />
-              </View>
-              
-              <View style={{ flex: 1 }}>
-                <Text style={commonStyles.text} numberOfLines={1}>
-                  {item.title}
-                </Text>
-                <Text style={commonStyles.caption}>
-                  {item.status} • ${item.price} • {formatDate(item.createdAt)}
-                </Text>
-              </View>
-              
-              <Icon name="chevron-right" size={20} color={colors.textSecondary} />
+                marginTop: 24,
+              }]}
+              onPress={handleLogout}
+            >
+              <Text style={[buttonStyles.text, { color: colors.error }]}>
+                Logout
+              </Text>
             </TouchableOpacity>
-          ))}
-
-          {userBets.length === 0 && userItems.length === 0 && (
-            <Text style={[commonStyles.caption, { textAlign: 'center', padding: 20 }]}>
-              No recent activity
-            </Text>
-          )}
-        </View>
-
-        {/* Account Actions */}
-        <View style={[commonStyles.card, { marginBottom: 20 }]}>
-          <TouchableOpacity
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              paddingVertical: 16,
-              borderBottomWidth: 1,
-              borderBottomColor: colors.border,
-            }}
-            onPress={() => router.push('/wallet')}
-          >
-            <Icon name="credit-card" size={24} color={colors.text} />
-            <Text style={[commonStyles.text, { marginLeft: 12, flex: 1 }]}>
-              Wallet & Payments
-            </Text>
-            <Icon name="chevron-right" size={20} color={colors.textSecondary} />
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              paddingVertical: 16,
-            }}
-            onPress={handleLogout}
-          >
-            <Icon name="log-out" size={24} color={colors.error} />
-            <Text style={[commonStyles.text, { marginLeft: 12, color: colors.error }]}>
-              Logout
-            </Text>
-          </TouchableOpacity>
-        </View>
-      </ScrollView>
+          </View>
+        </ScrollView>
+      </View>
     </SafeAreaView>
   );
 }

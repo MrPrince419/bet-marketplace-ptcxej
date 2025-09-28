@@ -1,8 +1,8 @@
 
 import { useState, useEffect } from 'react';
-import { Transaction, User } from '../types';
+import { Transaction } from '../types';
 import { useAuth } from './useAuth';
-import { stripeService, useStripePayment } from '../services/stripeService';
+import { mockPaymentService, MockPaymentResult } from '../services/mockPaymentService';
 import { getTransactions, saveTransactions } from '../utils/storage';
 import uuid from 'react-native-uuid';
 import { Alert, Platform } from 'react-native';
@@ -11,17 +11,20 @@ export const usePayments = () => {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(false);
   const { authState, updateUserBalance } = useAuth();
-  const { initializePaymentSheet, processPayment } = useStripePayment();
 
   useEffect(() => {
-    loadTransactions();
-  }, []);
+    if (authState.user) {
+      loadTransactions();
+    }
+  }, [authState.user]);
 
   const loadTransactions = async () => {
     try {
       const allTransactions = await getTransactions();
       const userTransactions = allTransactions.filter(t => t.userId === authState.user?.id);
-      setTransactions(userTransactions);
+      setTransactions(userTransactions.sort((a, b) => 
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      ));
     } catch (error) {
       console.log('Error loading transactions:', error);
     }
@@ -48,14 +51,14 @@ export const usePayments = () => {
     const updatedTransactions = [...allTransactions, transaction];
     await saveTransactions(updatedTransactions);
     
-    setTransactions(prev => [...prev, transaction]);
+    setTransactions(prev => [transaction, ...prev]);
     return transaction;
   };
 
   const updateTransactionStatus = async (
     transactionId: string,
     status: Transaction['status'],
-    stripePaymentIntentId?: string
+    mockTransactionId?: string
   ) => {
     const allTransactions = await getTransactions();
     const updatedTransactions = allTransactions.map(t => 
@@ -63,7 +66,7 @@ export const usePayments = () => {
         ? { 
             ...t, 
             status, 
-            stripePaymentIntentId,
+            stripePaymentIntentId: mockTransactionId,
             completedAt: status === 'completed' ? new Date().toISOString() : t.completedAt 
           }
         : t
@@ -75,7 +78,7 @@ export const usePayments = () => {
         ? { 
             ...t, 
             status, 
-            stripePaymentIntentId,
+            stripePaymentIntentId: mockTransactionId,
             completedAt: status === 'completed' ? new Date().toISOString() : t.completedAt 
           }
         : t
@@ -83,29 +86,23 @@ export const usePayments = () => {
   };
 
   const depositFunds = async (amount: number): Promise<boolean> => {
-    if (!authState.user) return false;
+    if (!authState.user) {
+      Alert.alert('Error', 'Please log in to deposit funds');
+      return false;
+    }
 
-    // On web, show alert that payments are not supported
-    if (Platform.OS === 'web') {
-      Alert.alert('Payment Not Available', 'Real payments are not supported on web. For demo purposes, we\'ll add the funds directly to your wallet.');
-      
-      // For demo purposes on web, just add the funds directly
-      const transaction = await createTransaction(
-        'deposit',
-        amount,
-        `Demo deposit $${amount} to wallet (web)`
-      );
-      
-      await updateTransactionStatus(transaction.id, 'completed');
-      const newBalance = authState.user.balance + amount;
-      await updateUserBalance(newBalance);
-      
-      Alert.alert('Demo Success', `$${amount} has been added to your wallet! (This is a demo - no real payment was processed)`);
-      return true;
+    if (amount <= 0) {
+      Alert.alert('Invalid Amount', 'Please enter a valid amount greater than $0');
+      return false;
     }
 
     setLoading(true);
     try {
+      // Show demo alert for web
+      if (Platform.OS === 'web') {
+        mockPaymentService.showPaymentNotSupportedAlert();
+      }
+
       // Create pending transaction
       const transaction = await createTransaction(
         'deposit',
@@ -113,19 +110,15 @@ export const usePayments = () => {
         `Deposit $${amount} to wallet`
       );
 
-      // Initialize Stripe payment sheet
-      const initialized = await initializePaymentSheet(amount);
-      if (!initialized) {
-        await updateTransactionStatus(transaction.id, 'failed');
-        Alert.alert('Error', 'Failed to initialize payment');
-        return false;
-      }
+      // Process mock payment
+      const result: MockPaymentResult = await mockPaymentService.processPayment(
+        amount,
+        `Wallet deposit for ${authState.user.username}`
+      );
 
-      // Process payment
-      const paymentSuccess = await processPayment();
-      if (paymentSuccess) {
+      if (result.success) {
         // Update transaction status
-        await updateTransactionStatus(transaction.id, 'completed');
+        await updateTransactionStatus(transaction.id, 'completed', result.transactionId);
         
         // Update user balance
         const newBalance = authState.user.balance + amount;
@@ -134,13 +127,13 @@ export const usePayments = () => {
         Alert.alert('Success', `$${amount} has been added to your wallet!`);
         return true;
       } else {
-        await updateTransactionStatus(transaction.id, 'cancelled');
-        Alert.alert('Payment Cancelled', 'Your payment was cancelled');
+        await updateTransactionStatus(transaction.id, 'failed');
+        Alert.alert('Payment Failed', result.error || 'Unknown error occurred');
         return false;
       }
     } catch (error) {
       console.log('Error depositing funds:', error);
-      Alert.alert('Error', 'Failed to process payment');
+      Alert.alert('Error', 'Failed to process deposit');
       return false;
     } finally {
       setLoading(false);
@@ -148,39 +141,56 @@ export const usePayments = () => {
   };
 
   const withdrawFunds = async (amount: number): Promise<boolean> => {
-    if (!authState.user || authState.user.balance < amount) {
+    if (!authState.user) {
+      Alert.alert('Error', 'Please log in to withdraw funds');
+      return false;
+    }
+
+    if (amount <= 0) {
+      Alert.alert('Invalid Amount', 'Please enter a valid amount greater than $0');
+      return false;
+    }
+
+    if (authState.user.balance < amount) {
       Alert.alert('Insufficient Funds', 'You do not have enough balance to withdraw this amount');
       return false;
     }
 
     setLoading(true);
     try {
+      // Show demo alert for web
+      if (Platform.OS === 'web') {
+        mockPaymentService.showPaymentNotSupportedAlert();
+      }
+
       // Create pending transaction
       const transaction = await createTransaction(
         'withdrawal',
         amount,
-        Platform.OS === 'web' 
-          ? `Demo withdraw $${amount} from wallet (web)`
-          : `Withdraw $${amount} from wallet`
+        `Withdraw $${amount} from wallet`
       );
 
-      // In a real app, you would process the withdrawal through Stripe
-      // For demo purposes, we'll simulate it
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // Process mock withdrawal
+      const result: MockPaymentResult = await mockPaymentService.processWithdrawal(
+        amount,
+        `Wallet withdrawal for ${authState.user.username}`
+      );
 
-      // Update transaction status
-      await updateTransactionStatus(transaction.id, 'completed');
-      
-      // Update user balance
-      const newBalance = authState.user.balance - amount;
-      await updateUserBalance(newBalance);
-      
-      const message = Platform.OS === 'web' 
-        ? `$${amount} has been withdrawn from your wallet! (This is a demo - no real withdrawal was processed)`
-        : `$${amount} has been withdrawn from your wallet!`;
-      
-      Alert.alert('Success', message);
-      return true;
+      if (result.success) {
+        // Update transaction status
+        await updateTransactionStatus(transaction.id, 'completed', result.transactionId);
+        
+        // Update user balance
+        const newBalance = authState.user.balance - amount;
+        await updateUserBalance(newBalance);
+        
+        Alert.alert('Success', `$${amount} has been withdrawn from your wallet!`);
+        return true;
+      } else {
+        await updateTransactionStatus(transaction.id, 'failed');
+        Alert.alert('Withdrawal Failed', result.error || 'Unknown error occurred');
+        return false;
+      }
     } catch (error) {
       console.log('Error withdrawing funds:', error);
       Alert.alert('Error', 'Failed to process withdrawal');
@@ -259,17 +269,11 @@ export const usePayments = () => {
         itemId
       );
 
-      // Create sale transaction for seller
-      const saleTransaction = await createTransaction(
-        'marketplace_sale',
-        amount * 0.95, // 5% platform fee
-        `Sale of marketplace item`,
-        itemId
-      );
+      // Simulate processing time
+      await new Promise(resolve => setTimeout(resolve, 1000));
 
-      // Mark transactions as completed
+      // Mark transaction as completed
       await updateTransactionStatus(purchaseTransaction.id, 'completed');
-      await updateTransactionStatus(saleTransaction.id, 'completed');
       
       // Update buyer balance
       const newBalance = authState.user.balance - amount;
@@ -287,9 +291,7 @@ export const usePayments = () => {
   };
 
   const getRecentTransactions = (): Transaction[] => {
-    return transactions
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-      .slice(0, 10);
+    return transactions.slice(0, 10);
   };
 
   const getPendingTransactions = (): Transaction[] => {

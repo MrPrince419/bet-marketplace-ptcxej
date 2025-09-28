@@ -12,8 +12,9 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Link, router } from 'expo-router';
-import { useAuth } from '../../hooks/useAuth';
 import { commonStyles, colors, buttonStyles } from '../../styles/commonStyles';
+import { useAuth } from '../../hooks/useAuth';
+import LoadingSpinner from '../../components/LoadingSpinner';
 
 export default function RegisterScreen() {
   const [email, setEmail] = useState('');
@@ -24,117 +25,138 @@ export default function RegisterScreen() {
   const { register } = useAuth();
 
   const handleRegister = async () => {
-    if (!email || !username || !password || !confirmPassword) {
-      Alert.alert('Error', 'Please fill in all fields');
+    if (!email.trim() || !username.trim() || !password.trim() || !confirmPassword.trim()) {
+      Alert.alert('Missing Information', 'Please fill in all fields');
       return;
     }
 
     if (password !== confirmPassword) {
-      Alert.alert('Error', 'Passwords do not match');
+      Alert.alert('Password Mismatch', 'Passwords do not match');
       return;
     }
 
     if (password.length < 6) {
-      Alert.alert('Error', 'Password must be at least 6 characters');
+      Alert.alert('Weak Password', 'Password must be at least 6 characters long');
+      return;
+    }
+
+    if (!email.includes('@')) {
+      Alert.alert('Invalid Email', 'Please enter a valid email address');
+      return;
+    }
+
+    if (username.length < 3) {
+      Alert.alert('Invalid Username', 'Username must be at least 3 characters long');
       return;
     }
 
     setLoading(true);
-    const success = await register(email, username, password);
-    setLoading(false);
-
-    if (success) {
-      router.replace('/main');
-    } else {
-      Alert.alert('Error', 'User with this email or username already exists');
+    try {
+      const success = await register(email.trim(), username.trim(), password);
+      if (success) {
+        Alert.alert(
+          'Welcome!',
+          'Your account has been created successfully. You start with $1,000 in your wallet!',
+          [{ text: 'OK', onPress: () => router.replace('/main') }]
+        );
+      } else {
+        Alert.alert('Registration Failed', 'An account with this email or username already exists');
+      }
+    } catch (error) {
+      console.log('Registration error:', error);
+      Alert.alert('Error', 'An error occurred during registration');
+    } finally {
+      setLoading(false);
     }
   };
 
+  if (loading) {
+    return <LoadingSpinner message="Creating account..." />;
+  }
+
   return (
-    <SafeAreaView style={commonStyles.container}>
+    <SafeAreaView style={commonStyles.wrapper}>
       <KeyboardAvoidingView
+        style={commonStyles.container}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={{ flex: 1 }}
       >
         <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
-          <View style={[commonStyles.content, { justifyContent: 'center' }]}>
-            <View style={{ marginBottom: 40 }}>
-              <Text style={commonStyles.title}>Create Account</Text>
+          <View style={[commonStyles.content, { justifyContent: 'center', flex: 1 }]}>
+            <View style={{ alignItems: 'center', marginBottom: 48 }}>
+              <Text style={[commonStyles.title, { fontSize: 32, marginBottom: 8 }]}>
+                Create Account
+              </Text>
               <Text style={commonStyles.textSecondary}>
-                Join our community and start betting and trading
+                Join the betting and marketplace community
               </Text>
             </View>
 
-            <View style={{ marginBottom: 16 }}>
-              <Text style={[commonStyles.text, { marginBottom: 8 }]}>Email</Text>
+            <View style={commonStyles.section}>
               <TextInput
                 style={commonStyles.input}
+                placeholder="Email"
                 value={email}
                 onChangeText={setEmail}
-                placeholder="Enter your email"
                 keyboardType="email-address"
                 autoCapitalize="none"
                 autoCorrect={false}
               />
-            </View>
 
-            <View style={{ marginBottom: 16 }}>
-              <Text style={[commonStyles.text, { marginBottom: 8 }]}>Username</Text>
               <TextInput
                 style={commonStyles.input}
+                placeholder="Username"
                 value={username}
                 onChangeText={setUsername}
-                placeholder="Choose a username"
                 autoCapitalize="none"
                 autoCorrect={false}
               />
-            </View>
 
-            <View style={{ marginBottom: 16 }}>
-              <Text style={[commonStyles.text, { marginBottom: 8 }]}>Password</Text>
               <TextInput
                 style={commonStyles.input}
+                placeholder="Password"
                 value={password}
                 onChangeText={setPassword}
-                placeholder="Create a password"
                 secureTextEntry
                 autoCapitalize="none"
-                autoCorrect={false}
               />
-            </View>
 
-            <View style={{ marginBottom: 32 }}>
-              <Text style={[commonStyles.text, { marginBottom: 8 }]}>Confirm Password</Text>
               <TextInput
                 style={commonStyles.input}
+                placeholder="Confirm Password"
                 value={confirmPassword}
                 onChangeText={setConfirmPassword}
-                placeholder="Confirm your password"
                 secureTextEntry
                 autoCapitalize="none"
-                autoCorrect={false}
               />
+
+              <TouchableOpacity
+                style={buttonStyles.primary}
+                onPress={handleRegister}
+                disabled={loading}
+              >
+                <Text style={[buttonStyles.text, buttonStyles.primaryText]}>
+                  Create Account
+                </Text>
+              </TouchableOpacity>
             </View>
 
-            <TouchableOpacity
-              style={[buttonStyles.primary, { marginBottom: 16 }]}
-              onPress={handleRegister}
-              disabled={loading}
-            >
-              <Text style={[buttonStyles.text, buttonStyles.primaryText]}>
-                {loading ? 'Creating Account...' : 'Create Account'}
+            <View style={{ alignItems: 'center', marginTop: 32 }}>
+              <Text style={commonStyles.textSecondary}>
+                Already have an account?{' '}
+                <Link href="/auth/login" style={{ color: colors.primary, fontWeight: '600' }}>
+                  Sign in
+                </Link>
               </Text>
-            </TouchableOpacity>
+            </View>
 
-            <View style={[commonStyles.row, { justifyContent: 'center' }]}>
-              <Text style={commonStyles.textSecondary}>Already have an account? </Text>
-              <Link href="/auth/login" asChild>
-                <TouchableOpacity>
-                  <Text style={[commonStyles.text, { color: colors.primary }]}>
-                    Sign In
-                  </Text>
-                </TouchableOpacity>
-              </Link>
+            {/* Welcome Bonus Info */}
+            <View style={[commonStyles.card, { marginTop: 32, backgroundColor: colors.backgroundAlt }]}>
+              <Text style={[commonStyles.text, { fontWeight: '600', marginBottom: 8 }]}>
+                🎉 Welcome Bonus
+              </Text>
+              <Text style={commonStyles.textSecondary}>
+                New users receive $1,000 starting balance to begin betting and shopping!
+              </Text>
             </View>
           </View>
         </ScrollView>

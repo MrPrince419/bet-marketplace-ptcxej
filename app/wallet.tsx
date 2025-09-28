@@ -8,35 +8,32 @@ import {
   TextInput,
   Alert,
   RefreshControl,
-  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { commonStyles, colors, buttonStyles } from '../styles/commonStyles';
+import { router } from 'expo-router';
+import Icon from '../components/Icon';
+import SimpleBottomSheet from '../components/BottomSheet';
+import LoadingSpinner from '../components/LoadingSpinner';
 import { useAuth } from '../hooks/useAuth';
 import { usePayments } from '../hooks/usePayments';
-import Icon from '../components/Icon';
-import { router } from 'expo-router';
-import SimpleBottomSheet from '../components/BottomSheet';
+import { commonStyles, colors, buttonStyles } from '../styles/commonStyles';
 
 export default function WalletScreen() {
-  const { authState } = useAuth();
-  const { 
-    loading, 
-    depositFunds, 
-    withdrawFunds, 
-    getRecentTransactions, 
-    getPendingTransactions,
-    loadTransactions 
-  } = usePayments();
-  
+  const [refreshing, setRefreshing] = useState(false);
   const [depositAmount, setDepositAmount] = useState('');
   const [withdrawAmount, setWithdrawAmount] = useState('');
   const [showDepositSheet, setShowDepositSheet] = useState(false);
   const [showWithdrawSheet, setShowWithdrawSheet] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
-
-  const recentTransactions = getRecentTransactions();
-  const pendingTransactions = getPendingTransactions();
+  
+  const { authState } = useAuth();
+  const { 
+    transactions, 
+    loading, 
+    depositFunds, 
+    withdrawFunds, 
+    getRecentTransactions,
+    loadTransactions 
+  } = usePayments();
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -47,17 +44,12 @@ export default function WalletScreen() {
   const handleDeposit = async () => {
     const amount = parseFloat(depositAmount);
     if (isNaN(amount) || amount <= 0) {
-      Alert.alert('Invalid Amount', 'Please enter a valid amount');
-      return;
-    }
-
-    if (amount < 1) {
-      Alert.alert('Minimum Deposit', 'Minimum deposit amount is $1');
+      Alert.alert('Invalid Amount', 'Please enter a valid amount greater than $0');
       return;
     }
 
     if (amount > 10000) {
-      Alert.alert('Maximum Deposit', 'Maximum deposit amount is $10,000');
+      Alert.alert('Amount Too Large', 'Maximum deposit amount is $10,000');
       return;
     }
 
@@ -71,17 +63,12 @@ export default function WalletScreen() {
   const handleWithdraw = async () => {
     const amount = parseFloat(withdrawAmount);
     if (isNaN(amount) || amount <= 0) {
-      Alert.alert('Invalid Amount', 'Please enter a valid amount');
+      Alert.alert('Invalid Amount', 'Please enter a valid amount greater than $0');
       return;
     }
 
-    if (amount < 1) {
-      Alert.alert('Minimum Withdrawal', 'Minimum withdrawal amount is $1');
-      return;
-    }
-
-    if (amount > (authState.user?.balance || 0)) {
-      Alert.alert('Insufficient Funds', 'You do not have enough balance');
+    if (!authState.user || amount > authState.user.balance) {
+      Alert.alert('Insufficient Funds', 'You do not have enough balance to withdraw this amount');
       return;
     }
 
@@ -92,35 +79,27 @@ export default function WalletScreen() {
     }
   };
 
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
+  const formatDate = (dateString: string): string => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { 
+      hour: '2-digit', 
+      minute: '2-digit' 
     });
   };
 
-  const getTransactionIcon = (type: string) => {
+  const getTransactionIcon = (type: string): keyof typeof Icon => {
     switch (type) {
-      case 'deposit':
-        return 'plus';
-      case 'withdrawal':
-        return 'minus';
-      case 'bet_escrow':
-        return 'lock';
-      case 'bet_payout':
-        return 'trophy';
-      case 'marketplace_purchase':
-        return 'shopping-cart';
-      case 'marketplace_sale':
-        return 'dollar-sign';
-      default:
-        return 'activity';
+      case 'deposit': return 'add-circle';
+      case 'withdrawal': return 'remove-circle';
+      case 'bet_escrow': return 'lock-closed';
+      case 'bet_payout': return 'trophy';
+      case 'marketplace_purchase': return 'bag';
+      case 'marketplace_sale': return 'cash';
+      default: return 'swap-horizontal';
     }
   };
 
-  const getTransactionColor = (type: string) => {
+  const getTransactionColor = (type: string): string => {
     switch (type) {
       case 'deposit':
       case 'bet_payout':
@@ -131,275 +110,185 @@ export default function WalletScreen() {
       case 'marketplace_purchase':
         return colors.error;
       default:
-        return colors.text;
+        return colors.textSecondary;
     }
   };
 
+  const getTransactionAmount = (transaction: any): string => {
+    const isPositive = ['deposit', 'bet_payout', 'marketplace_sale'].includes(transaction.type);
+    const sign = isPositive ? '+' : '-';
+    return `${sign}$${transaction.amount.toFixed(2)}`;
+  };
+
+  if (loading && transactions.length === 0) {
+    return <LoadingSpinner message="Loading wallet..." />;
+  }
+
+  const recentTransactions = getRecentTransactions();
+
   return (
-    <SafeAreaView style={commonStyles.container}>
-      {/* Header */}
-      <View style={commonStyles.header}>
-        <TouchableOpacity
-          style={commonStyles.backButton}
-          onPress={() => router.back()}
+    <SafeAreaView style={commonStyles.wrapper}>
+      <View style={commonStyles.container}>
+        {/* Header */}
+        <View style={[commonStyles.content, { paddingBottom: 0 }]}>
+          <View style={commonStyles.row}>
+            <TouchableOpacity onPress={() => router.back()}>
+              <Icon name="arrow-back" size={24} color={colors.text} />
+            </TouchableOpacity>
+            <Text style={commonStyles.title}>Wallet</Text>
+            <View style={{ width: 24 }} />
+          </View>
+        </View>
+
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ paddingBottom: 100 }}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
         >
-          <Icon name="arrow-left" size={24} color={colors.text} />
-        </TouchableOpacity>
-        <Text style={commonStyles.headerTitle}>Wallet</Text>
-        <View style={{ width: 40 }} />
-      </View>
+          {/* Balance Card */}
+          <View style={[commonStyles.content, { paddingTop: 0 }]}>
+            <View style={[commonStyles.card, { alignItems: 'center', padding: 32 }]}>
+              <Text style={commonStyles.textSecondary}>Current Balance</Text>
+              <Text style={[commonStyles.title, { fontSize: 36, marginBottom: 0 }]}>
+                ${authState.user?.balance.toFixed(2) || '0.00'}
+              </Text>
+            </View>
 
-      <ScrollView
-        style={commonStyles.content}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-      >
-        {/* Web Platform Notice */}
-        {Platform.OS === 'web' && (
-          <View style={[commonStyles.card, { 
-            marginBottom: 20, 
-            backgroundColor: colors.warning + '20',
-            borderColor: colors.warning,
-            borderWidth: 1 
-          }]}>
-            <Text style={[commonStyles.subtitle, { 
-              textAlign: 'center', 
-              color: colors.warning,
-              marginBottom: 10 
-            }]}>
-              Demo Mode (Web)
-            </Text>
-            <Text style={[commonStyles.caption, { textAlign: 'center' }]}>
-              Real payments are not supported on web. All transactions are simulated for demo purposes. 
-              Use the mobile app for actual payments.
-            </Text>
-          </View>
-        )}
+            {/* Action Buttons */}
+            <View style={[commonStyles.row, { marginBottom: 24 }]}>
+              <TouchableOpacity
+                style={[buttonStyles.primary, { flex: 1, marginRight: 8 }]}
+                onPress={() => setShowDepositSheet(true)}
+                disabled={loading}
+              >
+                <Text style={[buttonStyles.text, buttonStyles.primaryText]}>
+                  Deposit
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[buttonStyles.secondary, { flex: 1, marginLeft: 8 }]}
+                onPress={() => setShowWithdrawSheet(true)}
+                disabled={loading}
+              >
+                <Text style={[buttonStyles.text, buttonStyles.secondaryText]}>
+                  Withdraw
+                </Text>
+              </TouchableOpacity>
+            </View>
 
-        {/* Balance Card */}
-        <View style={[commonStyles.card, { marginBottom: 20 }]}>
-          <Text style={[commonStyles.subtitle, { textAlign: 'center', marginBottom: 10 }]}>
-            Current Balance
-          </Text>
-          <Text style={[commonStyles.title, { 
-            textAlign: 'center', 
-            fontSize: 36, 
-            color: colors.primary,
-            marginBottom: 20 
-          }]}>
-            ${authState.user?.balance?.toFixed(2) || '0.00'}
-          </Text>
-          
-          <View style={{ flexDirection: 'row', gap: 10 }}>
-            <TouchableOpacity
-              style={[buttonStyles.primary, { flex: 1 }]}
-              onPress={() => setShowDepositSheet(true)}
-              disabled={loading}
-            >
-              <Icon name="plus" size={20} color="white" />
-              <Text style={buttonStyles.primaryText}>Deposit</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity
-              style={[buttonStyles.secondary, { flex: 1 }]}
-              onPress={() => setShowWithdrawSheet(true)}
-              disabled={loading || (authState.user?.balance || 0) <= 0}
-            >
-              <Icon name="minus" size={20} color={colors.primary} />
-              <Text style={buttonStyles.secondaryText}>Withdraw</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Pending Transactions */}
-        {pendingTransactions.length > 0 && (
-          <View style={[commonStyles.card, { marginBottom: 20 }]}>
-            <Text style={[commonStyles.subtitle, { marginBottom: 15 }]}>
-              Pending Transactions
-            </Text>
-            {pendingTransactions.map((transaction) => (
-              <View key={transaction.id} style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                paddingVertical: 12,
-                borderBottomWidth: 1,
-                borderBottomColor: colors.border,
-              }}>
-                <View style={{
-                  width: 40,
-                  height: 40,
-                  borderRadius: 20,
-                  backgroundColor: colors.background,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  marginRight: 12,
-                }}>
-                  <Icon 
-                    name={getTransactionIcon(transaction.type)} 
-                    size={20} 
-                    color={colors.warning} 
-                  />
-                </View>
-                
-                <View style={{ flex: 1 }}>
-                  <Text style={commonStyles.text}>{transaction.description}</Text>
-                  <Text style={[commonStyles.caption, { color: colors.warning }]}>
-                    Pending • {formatDate(transaction.createdAt)}
-                  </Text>
-                </View>
-                
-                <Text style={[commonStyles.text, { 
-                  color: colors.warning,
-                  fontWeight: '600' 
-                }]}>
-                  ${transaction.amount.toFixed(2)}
+            {/* Recent Transactions */}
+            <Text style={commonStyles.subtitle}>Recent Transactions</Text>
+            {recentTransactions.length === 0 ? (
+              <View style={[commonStyles.card, commonStyles.center, { padding: 40 }]}>
+                <Icon name="receipt" size={48} color={colors.textSecondary} />
+                <Text style={[commonStyles.textSecondary, { marginTop: 16 }]}>
+                  No transactions yet
                 </Text>
               </View>
-            ))}
+            ) : (
+              recentTransactions.map((transaction) => (
+                <View key={transaction.id} style={commonStyles.card}>
+                  <View style={commonStyles.row}>
+                    <View style={[commonStyles.row, { flex: 1 }]}>
+                      <Icon
+                        name={getTransactionIcon(transaction.type)}
+                        size={24}
+                        color={getTransactionColor(transaction.type)}
+                        style={{ marginRight: 12 }}
+                      />
+                      <View style={{ flex: 1 }}>
+                        <Text style={commonStyles.text}>{transaction.description}</Text>
+                        <Text style={commonStyles.textSecondary}>
+                          {formatDate(transaction.createdAt)}
+                        </Text>
+                      </View>
+                    </View>
+                    <View style={{ alignItems: 'flex-end' }}>
+                      <Text
+                        style={[
+                          commonStyles.text,
+                          { 
+                            color: getTransactionColor(transaction.type),
+                            fontWeight: '600' 
+                          }
+                        ]}
+                      >
+                        {getTransactionAmount(transaction)}
+                      </Text>
+                      <Text style={[commonStyles.textSecondary, { fontSize: 12 }]}>
+                        {transaction.status}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+              ))
+            )}
           </View>
-        )}
+        </ScrollView>
 
-        {/* Recent Transactions */}
-        <View style={commonStyles.card}>
-          <Text style={[commonStyles.subtitle, { marginBottom: 15 }]}>
-            Recent Transactions
-          </Text>
-          
-          {recentTransactions.length === 0 ? (
-            <Text style={[commonStyles.caption, { textAlign: 'center', padding: 20 }]}>
-              No transactions yet
+        {/* Deposit Bottom Sheet */}
+        <SimpleBottomSheet
+          isVisible={showDepositSheet}
+          onClose={() => setShowDepositSheet(false)}
+        >
+          <View style={{ padding: 20 }}>
+            <Text style={[commonStyles.subtitle, { textAlign: 'center', marginBottom: 20 }]}>
+              Deposit Funds
             </Text>
-          ) : (
-            recentTransactions.map((transaction, index) => (
-              <View key={transaction.id} style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                paddingVertical: 12,
-                borderBottomWidth: index < recentTransactions.length - 1 ? 1 : 0,
-                borderBottomColor: colors.border,
-              }}>
-                <View style={{
-                  width: 40,
-                  height: 40,
-                  borderRadius: 20,
-                  backgroundColor: colors.background,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  marginRight: 12,
-                }}>
-                  <Icon 
-                    name={getTransactionIcon(transaction.type)} 
-                    size={20} 
-                    color={getTransactionColor(transaction.type)} 
-                  />
-                </View>
-                
-                <View style={{ flex: 1 }}>
-                  <Text style={commonStyles.text}>{transaction.description}</Text>
-                  <Text style={commonStyles.caption}>
-                    {transaction.status === 'completed' ? 'Completed' : transaction.status} • {formatDate(transaction.createdAt)}
-                  </Text>
-                </View>
-                
-                <Text style={[commonStyles.text, { 
-                  color: getTransactionColor(transaction.type),
-                  fontWeight: '600' 
-                }]}>
-                  {transaction.type === 'deposit' || transaction.type === 'bet_payout' || transaction.type === 'marketplace_sale' ? '+' : '-'}
-                  ${transaction.amount.toFixed(2)}
-                </Text>
-              </View>
-            ))
-          )}
-        </View>
-      </ScrollView>
-
-      {/* Deposit Bottom Sheet */}
-      <SimpleBottomSheet
-        isVisible={showDepositSheet}
-        onClose={() => setShowDepositSheet(false)}
-      >
-        <View style={{ padding: 20 }}>
-          <Text style={[commonStyles.title, { marginBottom: 20, textAlign: 'center' }]}>
-            Deposit Funds
-          </Text>
-          
-          <Text style={[commonStyles.label, { marginBottom: 8 }]}>Amount</Text>
-          <TextInput
-            style={commonStyles.input}
-            value={depositAmount}
-            onChangeText={setDepositAmount}
-            placeholder="Enter amount"
-            keyboardType="numeric"
-            autoFocus
-          />
-          
-          <View style={{ flexDirection: 'row', gap: 10, marginTop: 20 }}>
+            <TextInput
+              style={commonStyles.input}
+              placeholder="Enter amount"
+              value={depositAmount}
+              onChangeText={setDepositAmount}
+              keyboardType="numeric"
+              autoFocus
+            />
             <TouchableOpacity
-              style={[buttonStyles.secondary, { flex: 1 }]}
-              onPress={() => setShowDepositSheet(false)}
-            >
-              <Text style={buttonStyles.secondaryText}>Cancel</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity
-              style={[buttonStyles.primary, { flex: 1 }]}
+              style={[buttonStyles.primary, { marginTop: 16 }]}
               onPress={handleDeposit}
               disabled={loading}
             >
-              <Text style={buttonStyles.primaryText}>
+              <Text style={[buttonStyles.text, buttonStyles.primaryText]}>
                 {loading ? 'Processing...' : 'Deposit'}
               </Text>
             </TouchableOpacity>
           </View>
-        </View>
-      </SimpleBottomSheet>
+        </SimpleBottomSheet>
 
-      {/* Withdraw Bottom Sheet */}
-      <SimpleBottomSheet
-        isVisible={showWithdrawSheet}
-        onClose={() => setShowWithdrawSheet(false)}
-      >
-        <View style={{ padding: 20 }}>
-          <Text style={[commonStyles.title, { marginBottom: 20, textAlign: 'center' }]}>
-            Withdraw Funds
-          </Text>
-          
-          <Text style={[commonStyles.label, { marginBottom: 8 }]}>Amount</Text>
-          <TextInput
-            style={commonStyles.input}
-            value={withdrawAmount}
-            onChangeText={setWithdrawAmount}
-            placeholder="Enter amount"
-            keyboardType="numeric"
-            autoFocus
-          />
-          
-          <Text style={[commonStyles.caption, { marginTop: 8, marginBottom: 20 }]}>
-            Available balance: ${authState.user?.balance?.toFixed(2) || '0.00'}
-          </Text>
-          
-          <View style={{ flexDirection: 'row', gap: 10 }}>
+        {/* Withdraw Bottom Sheet */}
+        <SimpleBottomSheet
+          isVisible={showWithdrawSheet}
+          onClose={() => setShowWithdrawSheet(false)}
+        >
+          <View style={{ padding: 20 }}>
+            <Text style={[commonStyles.subtitle, { textAlign: 'center', marginBottom: 20 }]}>
+              Withdraw Funds
+            </Text>
+            <TextInput
+              style={commonStyles.input}
+              placeholder="Enter amount"
+              value={withdrawAmount}
+              onChangeText={setWithdrawAmount}
+              keyboardType="numeric"
+              autoFocus
+            />
+            <Text style={[commonStyles.textSecondary, { marginBottom: 16 }]}>
+              Available: ${authState.user?.balance.toFixed(2) || '0.00'}
+            </Text>
             <TouchableOpacity
-              style={[buttonStyles.secondary, { flex: 1 }]}
-              onPress={() => setShowWithdrawSheet(false)}
-            >
-              <Text style={buttonStyles.secondaryText}>Cancel</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity
-              style={[buttonStyles.primary, { flex: 1 }]}
+              style={[buttonStyles.primary, { marginTop: 16 }]}
               onPress={handleWithdraw}
               disabled={loading}
             >
-              <Text style={buttonStyles.primaryText}>
+              <Text style={[buttonStyles.text, buttonStyles.primaryText]}>
                 {loading ? 'Processing...' : 'Withdraw'}
               </Text>
             </TouchableOpacity>
           </View>
-        </View>
-      </SimpleBottomSheet>
+        </SimpleBottomSheet>
+      </View>
     </SafeAreaView>
   );
 }

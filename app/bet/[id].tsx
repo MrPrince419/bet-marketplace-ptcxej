@@ -8,25 +8,30 @@ import {
   ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { router, useLocalSearchParams } from 'expo-router';
+import { Bet } from '../../types';
 import { commonStyles, colors, buttonStyles } from '../../styles/commonStyles';
+import Icon from '../../components/Icon';
+import LoadingSpinner from '../../components/LoadingSpinner';
+import ErrorMessage from '../../components/ErrorMessage';
 import { useBets } from '../../hooks/useBets';
 import { usePayments } from '../../hooks/usePayments';
-import { Bet } from '../../types';
-import { router, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../../hooks/useAuth';
-import Icon from '../../components/Icon';
 
 export default function BetDetailScreen() {
   const { id } = useLocalSearchParams();
-  const { bets, acceptBet, settleBet, cancelBet } = useBets();
-  const { createEscrowTransaction, releaseBetPayout } = usePayments();
   const [bet, setBet] = useState<Bet | null>(null);
+  const [loading, setLoading] = useState(true);
+  
+  const { bets, acceptBet, settleBet, cancelBet } = useBets();
   const { authState } = useAuth();
+  const { createEscrowTransaction, releaseBetPayout } = usePayments();
 
   useEffect(() => {
     if (id && bets.length > 0) {
       const foundBet = bets.find(b => b.id === id);
       setBet(foundBet || null);
+      setLoading(false);
     }
   }, [id, bets]);
 
@@ -34,20 +39,13 @@ export default function BetDetailScreen() {
     if (!bet || !authState.user) return;
 
     if (authState.user.balance < bet.amount) {
-      Alert.alert(
-        'Insufficient Funds',
-        `You need $${bet.amount} to accept this bet. Your current balance is $${authState.user.balance.toFixed(2)}.`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Add Funds', onPress: () => router.push('/wallet') },
-        ]
-      );
+      Alert.alert('Insufficient Funds', 'You do not have enough balance to accept this bet');
       return;
     }
 
     Alert.alert(
       'Accept Bet',
-      `Are you sure you want to accept this bet for $${bet.amount}? This amount will be held in escrow until the bet is settled.`,
+      `Are you sure you want to accept this bet for $${bet.amount}?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -60,12 +58,10 @@ export default function BetDetailScreen() {
               createEscrowTransaction
             );
             if (success) {
-              Alert.alert('Success', 'Bet accepted! Funds have been placed in escrow.');
-            } else {
-              Alert.alert('Error', 'Failed to accept bet. Please try again.');
+              Alert.alert('Bet Accepted!', 'The bet has been accepted and funds are in escrow.');
             }
-          },
-        },
+          }
+        }
       ]
     );
   };
@@ -75,7 +71,7 @@ export default function BetDetailScreen() {
 
     Alert.alert(
       'Settle Bet',
-      `Are you sure ${winnerName} won this bet? The winner will receive $${(bet.amount * 2).toFixed(2)}.`,
+      `Declare ${winnerName} as the winner?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -83,12 +79,10 @@ export default function BetDetailScreen() {
           onPress: async () => {
             const success = await settleBet(bet.id, winnerId, winnerName, releaseBetPayout);
             if (success) {
-              Alert.alert('Success', 'Bet has been settled and winnings have been paid out.');
-            } else {
-              Alert.alert('Error', 'Failed to settle bet. Please try again.');
+              Alert.alert('Bet Settled!', `${winnerName} has been declared the winner.`);
             }
-          },
-        },
+          }
+        }
       ]
     );
   };
@@ -102,303 +96,221 @@ export default function BetDetailScreen() {
       [
         { text: 'No', style: 'cancel' },
         {
-          text: 'Yes',
+          text: 'Yes, Cancel',
           style: 'destructive',
           onPress: async () => {
             const success = await cancelBet(bet.id);
             if (success) {
-              Alert.alert('Success', 'Bet has been cancelled.');
+              Alert.alert('Bet Cancelled', 'The bet has been cancelled.');
               router.back();
-            } else {
-              Alert.alert('Error', 'Failed to cancel bet. Please try again.');
             }
-          },
-        },
+          }
+        }
       ]
     );
   };
 
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
+  const formatDate = (dateString: string): string => {
+    return new Date(dateString).toLocaleString();
   };
+
+  const getStatusColor = (status: string): string => {
+    switch (status) {
+      case 'open': return colors.primary;
+      case 'accepted': return colors.warning;
+      case 'settled': return colors.success;
+      case 'cancelled': return colors.textSecondary;
+      default: return colors.textSecondary;
+    }
+  };
+
+  const getStatusText = (status: string): string => {
+    switch (status) {
+      case 'open': return 'Open for Acceptance';
+      case 'accepted': return 'In Progress';
+      case 'settled': return 'Settled';
+      case 'cancelled': return 'Cancelled';
+      default: return status;
+    }
+  };
+
+  if (loading) {
+    return <LoadingSpinner message="Loading bet details..." />;
+  }
 
   if (!bet) {
     return (
-      <SafeAreaView style={commonStyles.container}>
-        <View style={commonStyles.header}>
-          <TouchableOpacity
-            style={commonStyles.backButton}
-            onPress={() => router.back()}
-          >
-            <Icon name="arrow-left" size={24} color={colors.text} />
-          </TouchableOpacity>
-          <Text style={commonStyles.headerTitle}>Bet Details</Text>
-          <View style={{ width: 40 }} />
-        </View>
-        <View style={[commonStyles.content, { justifyContent: 'center', alignItems: 'center' }]}>
-          <Text style={commonStyles.text}>Bet not found</Text>
-        </View>
-      </SafeAreaView>
+      <ErrorMessage
+        message="Bet not found"
+        onRetry={() => router.back()}
+        retryText="Go Back"
+      />
     );
   }
 
   const isCreator = bet.creatorId === authState.user?.id;
   const isAcceptor = bet.acceptorId === authState.user?.id;
+  const isParticipant = isCreator || isAcceptor;
   const canAccept = bet.status === 'open' && !isCreator && authState.user;
-  const canSettle = bet.status === 'accepted' && (isCreator || isAcceptor);
+  const canSettle = bet.status === 'accepted' && isParticipant;
   const canCancel = bet.status === 'open' && isCreator;
 
   return (
-    <SafeAreaView style={commonStyles.container}>
-      {/* Header */}
-      <View style={commonStyles.header}>
-        <TouchableOpacity
-          style={commonStyles.backButton}
-          onPress={() => router.back()}
-        >
-          <Icon name="arrow-left" size={24} color={colors.text} />
-        </TouchableOpacity>
-        <Text style={commonStyles.headerTitle}>Bet Details</Text>
-        <View style={{ width: 40 }} />
+    <SafeAreaView style={commonStyles.wrapper}>
+      <View style={commonStyles.container}>
+        {/* Header */}
+        <View style={[commonStyles.content, { paddingBottom: 0 }]}>
+          <View style={[commonStyles.row, { marginBottom: 24 }]}>
+            <TouchableOpacity onPress={() => router.back()}>
+              <Icon name="arrow-back" size={24} color={colors.text} />
+            </TouchableOpacity>
+            <Text style={commonStyles.title}>Bet Details</Text>
+            <View style={{ width: 24 }} />
+          </View>
+        </View>
+
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 100 }}>
+          <View style={commonStyles.content}>
+            {/* Bet Info Card */}
+            <View style={commonStyles.card}>
+              <View style={[commonStyles.row, { marginBottom: 16 }]}>
+                <Text style={[commonStyles.subtitle, { flex: 1 }]}>
+                  {bet.title}
+                </Text>
+                <View style={{
+                  backgroundColor: getStatusColor(bet.status),
+                  paddingHorizontal: 12,
+                  paddingVertical: 6,
+                  borderRadius: 16,
+                }}>
+                  <Text style={{
+                    color: colors.background,
+                    fontSize: 12,
+                    fontWeight: '600',
+                  }}>
+                    {getStatusText(bet.status)}
+                  </Text>
+                </View>
+              </View>
+
+              <Text style={[commonStyles.text, { marginBottom: 16, lineHeight: 24 }]}>
+                {bet.description}
+              </Text>
+
+              <View style={[commonStyles.row, { marginBottom: 8 }]}>
+                <Text style={commonStyles.textSecondary}>Amount:</Text>
+                <Text style={[commonStyles.text, { fontWeight: '700', fontSize: 18 }]}>
+                  ${bet.amount}
+                </Text>
+              </View>
+
+              <View style={[commonStyles.row, { marginBottom: 8 }]}>
+                <Text style={commonStyles.textSecondary}>Created by:</Text>
+                <Text style={commonStyles.text}>{bet.creatorUsername}</Text>
+              </View>
+
+              {bet.acceptorUsername && (
+                <View style={[commonStyles.row, { marginBottom: 8 }]}>
+                  <Text style={commonStyles.textSecondary}>Accepted by:</Text>
+                  <Text style={commonStyles.text}>{bet.acceptorUsername}</Text>
+                </View>
+              )}
+
+              <View style={[commonStyles.row, { marginBottom: bet.settledAt ? 8 : 0 }]}>
+                <Text style={commonStyles.textSecondary}>Created:</Text>
+                <Text style={commonStyles.text}>{formatDate(bet.createdAt)}</Text>
+              </View>
+
+              {bet.settledAt && (
+                <View style={commonStyles.row}>
+                  <Text style={commonStyles.textSecondary}>Settled:</Text>
+                  <Text style={commonStyles.text}>{formatDate(bet.settledAt)}</Text>
+                </View>
+              )}
+            </View>
+
+            {/* Winner Info */}
+            {bet.status === 'settled' && bet.winner && (
+              <View style={[commonStyles.card, { backgroundColor: colors.backgroundAlt }]}>
+                <View style={[commonStyles.row, { alignItems: 'center' }]}>
+                  <Icon name="trophy" size={24} color={colors.warning} style={{ marginRight: 12 }} />
+                  <View>
+                    <Text style={[commonStyles.text, { fontWeight: '600' }]}>Winner</Text>
+                    <Text style={commonStyles.textSecondary}>
+                      {bet.winner === bet.creatorId ? bet.creatorUsername : bet.acceptorUsername}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            )}
+
+            {/* Action Buttons */}
+            <View style={commonStyles.section}>
+              {canAccept && (
+                <TouchableOpacity
+                  style={buttonStyles.primary}
+                  onPress={handleAcceptBet}
+                >
+                  <Text style={[buttonStyles.text, buttonStyles.primaryText]}>
+                    Accept Bet - ${bet.amount}
+                  </Text>
+                </TouchableOpacity>
+              )}
+
+              {canSettle && (
+                <>
+                  <Text style={[commonStyles.subtitle, { marginBottom: 16 }]}>
+                    Settle Bet
+                  </Text>
+                  <TouchableOpacity
+                    style={[buttonStyles.primary, { marginBottom: 12 }]}
+                    onPress={() => handleSettleBet(bet.creatorId, bet.creatorUsername)}
+                  >
+                    <Text style={[buttonStyles.text, buttonStyles.primaryText]}>
+                      {bet.creatorUsername} Wins
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={buttonStyles.secondary}
+                    onPress={() => handleSettleBet(bet.acceptorId!, bet.acceptorUsername!)}
+                  >
+                    <Text style={[buttonStyles.text, buttonStyles.secondaryText]}>
+                      {bet.acceptorUsername} Wins
+                    </Text>
+                  </TouchableOpacity>
+                </>
+              )}
+
+              {canCancel && (
+                <TouchableOpacity
+                  style={[buttonStyles.secondary, { 
+                    borderColor: colors.error,
+                    backgroundColor: colors.background,
+                  }]}
+                  onPress={handleCancelBet}
+                >
+                  <Text style={[buttonStyles.text, { color: colors.error }]}>
+                    Cancel Bet
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {/* Info */}
+            {bet.status === 'open' && !isCreator && (
+              <View style={[commonStyles.card, { backgroundColor: colors.backgroundAlt }]}>
+                <Text style={[commonStyles.text, { fontWeight: '600', marginBottom: 8 }]}>
+                  How it works:
+                </Text>
+                <Text style={commonStyles.textSecondary}>
+                  When you accept this bet, ${bet.amount * 2} will be held in escrow. 
+                  The winner gets the full amount when the bet is settled.
+                </Text>
+              </View>
+            )}
+          </View>
+        </ScrollView>
       </View>
-
-      <ScrollView style={commonStyles.content}>
-        {/* Bet Info */}
-        <View style={[commonStyles.card, { marginBottom: 20 }]}>
-          <View style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            marginBottom: 16,
-          }}>
-            <View style={{
-              paddingHorizontal: 12,
-              paddingVertical: 6,
-              borderRadius: 16,
-              backgroundColor: bet.status === 'open' ? colors.warning + '20' :
-                              bet.status === 'accepted' ? colors.primary + '20' :
-                              bet.status === 'settled' ? colors.success + '20' :
-                              colors.error + '20',
-            }}>
-              <Text style={{
-                fontSize: 12,
-                fontWeight: '600',
-                color: bet.status === 'open' ? colors.warning :
-                       bet.status === 'accepted' ? colors.primary :
-                       bet.status === 'settled' ? colors.success :
-                       colors.error,
-                textTransform: 'uppercase',
-              }}>
-                {bet.status}
-              </Text>
-            </View>
-            <View style={{ flex: 1 }} />
-            <Text style={[commonStyles.title, { color: colors.primary }]}>
-              ${bet.amount}
-            </Text>
-          </View>
-
-          <Text style={[commonStyles.title, { marginBottom: 12 }]}>
-            {bet.title}
-          </Text>
-          
-          <Text style={[commonStyles.text, { marginBottom: 20 }]}>
-            {bet.description}
-          </Text>
-
-          {/* Participants */}
-          <View style={{
-            backgroundColor: colors.background,
-            padding: 16,
-            borderRadius: 12,
-            marginBottom: 16,
-          }}>
-            <Text style={[commonStyles.subtitle, { marginBottom: 12 }]}>
-              Participants
-            </Text>
-            
-            <View style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              marginBottom: 8,
-            }}>
-              <Icon name="user" size={20} color={colors.primary} />
-              <Text style={[commonStyles.text, { marginLeft: 8 }]}>
-                Creator: {bet.creatorUsername}
-                {isCreator && ' (You)'}
-              </Text>
-            </View>
-            
-            {bet.acceptorUsername ? (
-              <View style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-              }}>
-                <Icon name="user-check" size={20} color={colors.success} />
-                <Text style={[commonStyles.text, { marginLeft: 8 }]}>
-                  Acceptor: {bet.acceptorUsername}
-                  {isAcceptor && ' (You)'}
-                </Text>
-              </View>
-            ) : (
-              <View style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-              }}>
-                <Icon name="user-plus" size={20} color={colors.textSecondary} />
-                <Text style={[commonStyles.caption, { marginLeft: 8 }]}>
-                  Waiting for someone to accept...
-                </Text>
-              </View>
-            )}
-          </View>
-
-          {/* Bet Details */}
-          <View style={{
-            flexDirection: 'row',
-            justifyContent: 'space-between',
-            paddingTop: 16,
-            borderTopWidth: 1,
-            borderTopColor: colors.border,
-          }}>
-            <View>
-              <Text style={commonStyles.caption}>Created</Text>
-              <Text style={commonStyles.text}>
-                {formatDate(bet.createdAt)}
-              </Text>
-            </View>
-            
-            {bet.settledAt && (
-              <View style={{ alignItems: 'flex-end' }}>
-                <Text style={commonStyles.caption}>Settled</Text>
-                <Text style={commonStyles.text}>
-                  {formatDate(bet.settledAt)}
-                </Text>
-              </View>
-            )}
-          </View>
-
-          {bet.status === 'settled' && bet.winner && (
-            <View style={{
-              backgroundColor: colors.success + '20',
-              padding: 16,
-              borderRadius: 12,
-              marginTop: 16,
-              alignItems: 'center',
-            }}>
-              <Icon name="trophy" size={32} color={colors.success} />
-              <Text style={[commonStyles.subtitle, { 
-                color: colors.success, 
-                marginTop: 8,
-                textAlign: 'center' 
-              }]}>
-                Winner: {bet.winner === bet.creatorId ? bet.creatorUsername : bet.acceptorUsername}
-              </Text>
-              <Text style={[commonStyles.caption, { textAlign: 'center', marginTop: 4 }]}>
-                Winnings: ${(bet.amount * 2).toFixed(2)}
-              </Text>
-            </View>
-          )}
-        </View>
-
-        {/* Action Buttons */}
-        <View style={[commonStyles.card, { marginBottom: 20 }]}>
-          {canAccept && (
-            <TouchableOpacity
-              style={[buttonStyles.primary, { marginBottom: 12 }]}
-              onPress={handleAcceptBet}
-            >
-              <Icon name="check" size={20} color="white" />
-              <Text style={buttonStyles.primaryText}>
-                Accept Bet (${bet.amount})
-              </Text>
-            </TouchableOpacity>
-          )}
-
-          {canSettle && (
-            <View>
-              <Text style={[commonStyles.subtitle, { marginBottom: 16, textAlign: 'center' }]}>
-                Who won this bet?
-              </Text>
-              
-              <TouchableOpacity
-                style={[buttonStyles.primary, { marginBottom: 12 }]}
-                onPress={() => handleSettleBet(bet.creatorId, bet.creatorUsername)}
-              >
-                <Icon name="trophy" size={20} color="white" />
-                <Text style={buttonStyles.primaryText}>
-                  {bet.creatorUsername} Won
-                </Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity
-                style={buttonStyles.primary}
-                onPress={() => handleSettleBet(bet.acceptorId!, bet.acceptorUsername!)}
-              >
-                <Icon name="trophy" size={20} color="white" />
-                <Text style={buttonStyles.primaryText}>
-                  {bet.acceptorUsername} Won
-                </Text>
-              </TouchableOpacity>
-            </View>
-          )}
-
-          {canCancel && (
-            <TouchableOpacity
-              style={[buttonStyles.secondary, { 
-                borderColor: colors.error,
-                marginBottom: 12 
-              }]}
-              onPress={handleCancelBet}
-            >
-              <Icon name="x" size={20} color={colors.error} />
-              <Text style={[buttonStyles.secondaryText, { color: colors.error }]}>
-                Cancel Bet
-              </Text>
-            </TouchableOpacity>
-          )}
-
-          {!canAccept && !canSettle && !canCancel && bet.status === 'open' && (
-            <View style={{
-              padding: 16,
-              backgroundColor: colors.background,
-              borderRadius: 12,
-              alignItems: 'center',
-            }}>
-              <Icon name="clock" size={32} color={colors.textSecondary} />
-              <Text style={[commonStyles.text, { 
-                textAlign: 'center', 
-                marginTop: 8 
-              }]}>
-                Waiting for someone to accept this bet
-              </Text>
-            </View>
-          )}
-
-          {bet.status === 'settled' && (
-            <View style={{
-              padding: 16,
-              backgroundColor: colors.success + '20',
-              borderRadius: 12,
-              alignItems: 'center',
-            }}>
-              <Icon name="check-circle" size={32} color={colors.success} />
-              <Text style={[commonStyles.text, { 
-                textAlign: 'center', 
-                marginTop: 8,
-                color: colors.success 
-              }]}>
-                This bet has been settled
-              </Text>
-            </View>
-          )}
-        </View>
-      </ScrollView>
     </SafeAreaView>
   );
 }

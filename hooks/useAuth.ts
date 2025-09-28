@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { User, AuthState } from '../types';
 import { getCurrentUser, saveCurrentUser, clearCurrentUser, getAllUsers, saveAllUsers } from '../utils/storage';
+import { seedInitialData } from '../utils/dataSeeder';
 import uuid from 'react-native-uuid';
 
 export const useAuth = () => {
@@ -12,8 +13,22 @@ export const useAuth = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    loadUser();
+    initializeApp();
   }, []);
+
+  const initializeApp = async () => {
+    try {
+      // Seed initial data if needed
+      await seedInitialData();
+      
+      // Load current user
+      await loadUser();
+    } catch (error) {
+      console.log('Error initializing app:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const loadUser = async () => {
     try {
@@ -26,15 +41,13 @@ export const useAuth = () => {
       }
     } catch (error) {
       console.log('Error loading user:', error);
-    } finally {
-      setLoading(false);
     }
   };
 
   const login = async (email: string, password: string): Promise<boolean> => {
     try {
       const users = await getAllUsers();
-      const user = users.find(u => u.email === email);
+      const user = users.find(u => u.email.toLowerCase() === email.toLowerCase());
       
       if (user) {
         await saveCurrentUser(user);
@@ -42,10 +55,10 @@ export const useAuth = () => {
           isAuthenticated: true,
           user,
         });
-        console.log('Login successful');
+        console.log('Login successful for user:', user.username);
         return true;
       } else {
-        console.log('User not found');
+        console.log('User not found for email:', email);
         return false;
       }
     } catch (error) {
@@ -59,14 +72,14 @@ export const useAuth = () => {
       const users = await getAllUsers();
       
       // Check if user already exists
-      if (users.find(u => u.email === email || u.username === username)) {
-        console.log('User already exists');
+      if (users.find(u => u.email.toLowerCase() === email.toLowerCase() || u.username.toLowerCase() === username.toLowerCase())) {
+        console.log('User already exists with email or username');
         return false;
       }
 
       const newUser: User = {
         id: uuid.v4() as string,
-        email,
+        email: email.toLowerCase(),
         username,
         balance: 1000, // Starting balance
         createdAt: new Date().toISOString(),
@@ -81,7 +94,7 @@ export const useAuth = () => {
         user: newUser,
       });
       
-      console.log('Registration successful');
+      console.log('Registration successful for user:', newUser.username);
       return true;
     } catch (error) {
       console.log('Registration error:', error);
@@ -118,6 +131,8 @@ export const useAuth = () => {
         isAuthenticated: true,
         user: updatedUser,
       });
+      
+      console.log(`User balance updated to $${newBalance}`);
     }
   };
 

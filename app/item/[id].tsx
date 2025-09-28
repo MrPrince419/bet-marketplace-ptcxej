@@ -10,30 +10,37 @@ import {
   Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { router, useLocalSearchParams } from 'expo-router';
+import { MarketplaceItem } from '../../types';
 import { commonStyles, colors, buttonStyles } from '../../styles/commonStyles';
+import Icon from '../../components/Icon';
+import LoadingSpinner from '../../components/LoadingSpinner';
+import ErrorMessage from '../../components/ErrorMessage';
+import SimpleBottomSheet from '../../components/BottomSheet';
 import { useMarketplace } from '../../hooks/useMarketplace';
 import { usePayments } from '../../hooks/usePayments';
-import { MarketplaceItem } from '../../types';
-import { router, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../../hooks/useAuth';
-import Icon from '../../components/Icon';
 
 export default function ItemDetailScreen() {
   const { id } = useLocalSearchParams();
-  const { items, placeBid, buyItem, acceptBid } = useMarketplace();
-  const { processMarketplacePurchase } = usePayments();
   const [item, setItem] = useState<MarketplaceItem | null>(null);
+  const [loading, setLoading] = useState(true);
   const [bidAmount, setBidAmount] = useState('');
+  const [showBidSheet, setShowBidSheet] = useState(false);
+  
+  const { items, placeBid, buyItem, acceptBid } = useMarketplace();
   const { authState } = useAuth();
+  const { processMarketplacePurchase } = usePayments();
 
   useEffect(() => {
     if (id && items.length > 0) {
       const foundItem = items.find(i => i.id === id);
       setItem(foundItem || null);
+      setLoading(false);
     }
   }, [id, items]);
 
-  const handlePlaceBid = async () => {
+  const handlePlaceBid = () => {
     if (!item || !authState.user) return;
 
     const amount = parseFloat(bidAmount);
@@ -43,15 +50,18 @@ export default function ItemDetailScreen() {
     }
 
     if (amount >= item.price) {
-      Alert.alert(
-        'High Bid',
-        'Your bid is equal to or higher than the asking price. Would you like to buy it now instead?',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Place Bid', onPress: () => placeBidConfirm(amount) },
-          { text: 'Buy Now', onPress: handleBuyNow },
-        ]
-      );
+      Alert.alert('Bid Too High', 'Your bid should be lower than the asking price. Use "Buy Now" instead.');
+      return;
+    }
+
+    const highestBid = getHighestBid();
+    if (amount <= highestBid) {
+      Alert.alert('Bid Too Low', `Your bid must be higher than the current highest bid of $${highestBid}`);
+      return;
+    }
+
+    if (amount > authState.user.balance) {
+      Alert.alert('Insufficient Funds', 'You do not have enough balance for this bid');
       return;
     }
 
@@ -61,39 +71,42 @@ export default function ItemDetailScreen() {
   const placeBidConfirm = async (amount: number) => {
     if (!item || !authState.user) return;
 
-    const success = await placeBid(
-      item.id,
-      authState.user.id,
-      authState.user.username,
-      amount
+    Alert.alert(
+      'Place Bid',
+      `Place a bid of $${amount} for "${item.title}"?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Place Bid',
+          onPress: async () => {
+            const success = await placeBid(
+              item.id,
+              authState.user!.id,
+              authState.user!.username,
+              amount
+            );
+            if (success) {
+              setBidAmount('');
+              setShowBidSheet(false);
+              Alert.alert('Bid Placed!', 'Your bid has been placed successfully.');
+            }
+          }
+        }
+      ]
     );
-
-    if (success) {
-      setBidAmount('');
-      Alert.alert('Success', 'Your bid has been placed!');
-    } else {
-      Alert.alert('Error', 'Failed to place bid. Please try again.');
-    }
   };
 
   const handleBuyNow = async () => {
     if (!item || !authState.user) return;
 
     if (authState.user.balance < item.price) {
-      Alert.alert(
-        'Insufficient Funds',
-        `You need $${item.price} to buy this item. Your current balance is $${authState.user.balance.toFixed(2)}.`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Add Funds', onPress: () => router.push('/wallet') },
-        ]
-      );
+      Alert.alert('Insufficient Funds', 'You do not have enough balance to buy this item');
       return;
     }
 
     Alert.alert(
-      'Confirm Purchase',
-      `Are you sure you want to buy "${item.title}" for $${item.price}?`,
+      'Buy Now',
+      `Purchase "${item.title}" for $${item.price}?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -101,12 +114,11 @@ export default function ItemDetailScreen() {
           onPress: async () => {
             const success = await buyItem(item.id, authState.user!.id, processMarketplacePurchase);
             if (success) {
-              Alert.alert('Success', 'Item purchased successfully!');
-            } else {
-              Alert.alert('Error', 'Failed to purchase item. Please try again.');
+              Alert.alert('Purchase Successful!', 'You have successfully purchased this item.');
+              router.back();
             }
-          },
-        },
+          }
+        }
       ]
     );
   };
@@ -116,7 +128,7 @@ export default function ItemDetailScreen() {
 
     Alert.alert(
       'Accept Bid',
-      `Accept bid of $${bidAmount} from ${bidderName}?`,
+      `Accept ${bidderName}'s bid of $${bidAmount}?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -124,304 +136,261 @@ export default function ItemDetailScreen() {
           onPress: async () => {
             const success = await acceptBid(item.id, bidId, processMarketplacePurchase);
             if (success) {
-              Alert.alert('Success', 'Bid accepted! Sale completed.');
-            } else {
-              Alert.alert('Error', 'Failed to accept bid. Please try again.');
+              Alert.alert('Bid Accepted!', `You have accepted ${bidderName}'s bid.`);
+              router.back();
             }
-          },
-        },
+          }
+        }
       ]
     );
   };
 
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
+  const formatDate = (dateString: string): string => {
+    return new Date(dateString).toLocaleString();
   };
 
-  const getHighestBid = () => {
-    if (!item || item.bids.length === 0) return null;
-    return item.bids.reduce((highest, bid) => 
-      bid.amount > highest.amount ? bid : highest
-    );
+  const getHighestBid = (): number => {
+    if (!item || item.bids.length === 0) return 0;
+    return Math.max(...item.bids.filter(bid => bid.status === 'active').map(bid => bid.amount));
   };
+
+  const getStatusColor = (status: string): string => {
+    switch (status) {
+      case 'available': return colors.success;
+      case 'sold': return colors.textSecondary;
+      case 'reserved': return colors.warning;
+      default: return colors.textSecondary;
+    }
+  };
+
+  const getStatusText = (status: string): string => {
+    switch (status) {
+      case 'available': return 'Available';
+      case 'sold': return 'Sold';
+      case 'reserved': return 'Reserved';
+      default: return status;
+    }
+  };
+
+  if (loading) {
+    return <LoadingSpinner message="Loading item details..." />;
+  }
 
   if (!item) {
     return (
-      <SafeAreaView style={commonStyles.container}>
-        <View style={commonStyles.header}>
-          <TouchableOpacity
-            style={commonStyles.backButton}
-            onPress={() => router.back()}
-          >
-            <Icon name="arrow-left" size={24} color={colors.text} />
-          </TouchableOpacity>
-          <Text style={commonStyles.headerTitle}>Item Details</Text>
-          <View style={{ width: 40 }} />
-        </View>
-        <View style={[commonStyles.content, { justifyContent: 'center', alignItems: 'center' }]}>
-          <Text style={commonStyles.text}>Item not found</Text>
-        </View>
-      </SafeAreaView>
+      <ErrorMessage
+        message="Item not found"
+        onRetry={() => router.back()}
+        retryText="Go Back"
+      />
     );
   }
 
-  const isOwner = item.sellerId === authState.user?.id;
+  const isSeller = item.sellerId === authState.user?.id;
+  const canBuy = item.status === 'available' && !isSeller && authState.user;
+  const canBid = item.status === 'available' && !isSeller && authState.user;
+  const activeBids = item.bids.filter(bid => bid.status === 'active');
   const highestBid = getHighestBid();
-  const canBuy = item.status === 'available' && !isOwner && authState.user;
-  const canBid = item.status === 'available' && !isOwner && authState.user;
 
   return (
-    <SafeAreaView style={commonStyles.container}>
-      {/* Header */}
-      <View style={commonStyles.header}>
-        <TouchableOpacity
-          style={commonStyles.backButton}
-          onPress={() => router.back()}
-        >
-          <Icon name="arrow-left" size={24} color={colors.text} />
-        </TouchableOpacity>
-        <Text style={commonStyles.headerTitle}>Item Details</Text>
-        <View style={{ width: 40 }} />
-      </View>
-
-      <ScrollView style={commonStyles.content}>
-        {/* Item Image */}
-        {item.imageUrl && (
-          <View style={{ marginBottom: 20 }}>
-            <Image
-              source={{ uri: item.imageUrl }}
-              style={{
-                width: '100%',
-                height: 200,
-                borderRadius: 12,
-                backgroundColor: colors.background,
-              }}
-              resizeMode="cover"
-            />
+    <SafeAreaView style={commonStyles.wrapper}>
+      <View style={commonStyles.container}>
+        {/* Header */}
+        <View style={[commonStyles.content, { paddingBottom: 0 }]}>
+          <View style={[commonStyles.row, { marginBottom: 24 }]}>
+            <TouchableOpacity onPress={() => router.back()}>
+              <Icon name="arrow-back" size={24} color={colors.text} />
+            </TouchableOpacity>
+            <Text style={commonStyles.title}>Item Details</Text>
+            <View style={{ width: 24 }} />
           </View>
-        )}
-
-        {/* Item Info */}
-        <View style={[commonStyles.card, { marginBottom: 20 }]}>
-          <View style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            marginBottom: 16,
-          }}>
-            <View style={{
-              paddingHorizontal: 12,
-              paddingVertical: 6,
-              borderRadius: 16,
-              backgroundColor: item.status === 'available' ? colors.success + '20' : colors.error + '20',
-            }}>
-              <Text style={{
-                fontSize: 12,
-                fontWeight: '600',
-                color: item.status === 'available' ? colors.success : colors.error,
-                textTransform: 'uppercase',
-              }}>
-                {item.status}
-              </Text>
-            </View>
-            <View style={{ flex: 1 }} />
-            <Text style={[commonStyles.title, { color: colors.primary }]}>
-              ${item.price}
-            </Text>
-          </View>
-
-          <Text style={[commonStyles.title, { marginBottom: 12 }]}>
-            {item.title}
-          </Text>
-          
-          <Text style={[commonStyles.text, { marginBottom: 20 }]}>
-            {item.description}
-          </Text>
-
-          {/* Seller Info */}
-          <View style={{
-            backgroundColor: colors.background,
-            padding: 16,
-            borderRadius: 12,
-            marginBottom: 16,
-          }}>
-            <View style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-            }}>
-              <Icon name="user" size={20} color={colors.primary} />
-              <Text style={[commonStyles.text, { marginLeft: 8 }]}>
-                Seller: {item.sellerUsername}
-                {isOwner && ' (You)'}
-              </Text>
-            </View>
-            <Text style={[commonStyles.caption, { marginTop: 4 }]}>
-              Listed on {formatDate(item.createdAt)}
-            </Text>
-          </View>
-
-          {/* Highest Bid */}
-          {highestBid && (
-            <View style={{
-              backgroundColor: colors.warning + '20',
-              padding: 16,
-              borderRadius: 12,
-              marginBottom: 16,
-            }}>
-              <View style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-              }}>
-                <View>
-                  <Text style={[commonStyles.subtitle, { color: colors.warning }]}>
-                    Highest Bid
-                  </Text>
-                  <Text style={commonStyles.caption}>
-                    by {highestBid.bidderUsername}
-                  </Text>
-                </View>
-                <Text style={[commonStyles.title, { color: colors.warning }]}>
-                  ${highestBid.amount}
-                </Text>
-              </View>
-            </View>
-          )}
         </View>
 
-        {/* Action Buttons */}
-        {canBuy && (
-          <View style={[commonStyles.card, { marginBottom: 20 }]}>
-            <TouchableOpacity
-              style={[buttonStyles.primary, { marginBottom: 12 }]}
-              onPress={handleBuyNow}
-            >
-              <Icon name="shopping-cart" size={20} color="white" />
-              <Text style={buttonStyles.primaryText}>
-                Buy Now - ${item.price}
-              </Text>
-            </TouchableOpacity>
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 100 }}>
+          <View style={commonStyles.content}>
+            {/* Item Image */}
+            {item.imageUrl && (
+              <Image
+                source={{ uri: item.imageUrl }}
+                style={{
+                  width: '100%',
+                  height: 250,
+                  borderRadius: 12,
+                  marginBottom: 20,
+                }}
+                resizeMode="cover"
+              />
+            )}
 
-            {canBid && (
-              <View>
-                <Text style={[commonStyles.label, { marginBottom: 8 }]}>
-                  Place a Bid
+            {/* Item Info Card */}
+            <View style={commonStyles.card}>
+              <View style={[commonStyles.row, { marginBottom: 16 }]}>
+                <Text style={[commonStyles.subtitle, { flex: 1 }]}>
+                  {item.title}
                 </Text>
-                <View style={{ flexDirection: 'row', gap: 10 }}>
-                  <TextInput
-                    style={[commonStyles.input, { flex: 1 }]}
-                    value={bidAmount}
-                    onChangeText={setBidAmount}
-                    placeholder="Enter bid amount"
-                    keyboardType="numeric"
-                  />
-                  <TouchableOpacity
-                    style={buttonStyles.secondary}
-                    onPress={handlePlaceBid}
-                  >
-                    <Text style={buttonStyles.secondaryText}>Bid</Text>
-                  </TouchableOpacity>
+                <View style={{
+                  backgroundColor: getStatusColor(item.status),
+                  paddingHorizontal: 12,
+                  paddingVertical: 6,
+                  borderRadius: 16,
+                }}>
+                  <Text style={{
+                    color: colors.background,
+                    fontSize: 12,
+                    fontWeight: '600',
+                  }}>
+                    {getStatusText(item.status)}
+                  </Text>
                 </View>
+              </View>
+
+              <Text style={[commonStyles.text, { marginBottom: 16, lineHeight: 24 }]}>
+                {item.description}
+              </Text>
+
+              <View style={[commonStyles.row, { marginBottom: 8 }]}>
+                <Text style={commonStyles.textSecondary}>Price:</Text>
+                <Text style={[commonStyles.text, { fontWeight: '700', fontSize: 18 }]}>
+                  ${item.price}
+                </Text>
+              </View>
+
+              <View style={[commonStyles.row, { marginBottom: 8 }]}>
+                <Text style={commonStyles.textSecondary}>Seller:</Text>
+                <Text style={commonStyles.text}>{item.sellerUsername}</Text>
+              </View>
+
+              <View style={[commonStyles.row, { marginBottom: highestBid > 0 ? 8 : 0 }]}>
+                <Text style={commonStyles.textSecondary}>Listed:</Text>
+                <Text style={commonStyles.text}>{formatDate(item.createdAt)}</Text>
+              </View>
+
+              {highestBid > 0 && (
+                <View style={commonStyles.row}>
+                  <Text style={commonStyles.textSecondary}>Highest bid:</Text>
+                  <Text style={[commonStyles.text, { fontWeight: '600', color: colors.primary }]}>
+                    ${highestBid}
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            {/* Action Buttons */}
+            {canBuy && (
+              <View style={commonStyles.section}>
+                <TouchableOpacity
+                  style={buttonStyles.primary}
+                  onPress={handleBuyNow}
+                >
+                  <Text style={[buttonStyles.text, buttonStyles.primaryText]}>
+                    Buy Now - ${item.price}
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[buttonStyles.secondary, { marginTop: 12 }]}
+                  onPress={() => setShowBidSheet(true)}
+                >
+                  <Text style={[buttonStyles.text, buttonStyles.secondaryText]}>
+                    Place Bid
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {/* Bids Section */}
+            {activeBids.length > 0 && (
+              <>
+                <Text style={[commonStyles.subtitle, { marginBottom: 16 }]}>
+                  Current Bids ({activeBids.length})
+                </Text>
+                {activeBids
+                  .sort((a, b) => b.amount - a.amount)
+                  .map((bid) => (
+                    <View key={bid.id} style={commonStyles.card}>
+                      <View style={commonStyles.row}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={[commonStyles.text, { fontWeight: '600' }]}>
+                            ${bid.amount}
+                          </Text>
+                          <Text style={commonStyles.textSecondary}>
+                            by {bid.bidderUsername}
+                          </Text>
+                          <Text style={[commonStyles.textSecondary, { fontSize: 12 }]}>
+                            {formatDate(bid.createdAt)}
+                          </Text>
+                        </View>
+                        {isSeller && (
+                          <TouchableOpacity
+                            style={[buttonStyles.primary, { paddingHorizontal: 16, paddingVertical: 8 }]}
+                            onPress={() => handleAcceptBid(bid.id, bid.amount, bid.bidderUsername)}
+                          >
+                            <Text style={[buttonStyles.text, buttonStyles.primaryText, { fontSize: 14 }]}>
+                              Accept
+                            </Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    </View>
+                  ))}
+              </>
+            )}
+
+            {/* Info for buyers */}
+            {canBuy && (
+              <View style={[commonStyles.card, { backgroundColor: colors.backgroundAlt }]}>
+                <Text style={[commonStyles.text, { fontWeight: '600', marginBottom: 8 }]}>
+                  How it works:
+                </Text>
+                <Text style={commonStyles.textSecondary}>
+                  • Buy now to purchase immediately at the listed price{'\n'}
+                  • Place a bid to negotiate a lower price{'\n'}
+                  • The seller can accept your bid at any time{'\n'}
+                  • Payment is processed when purchase is confirmed
+                </Text>
               </View>
             )}
           </View>
-        )}
+        </ScrollView>
 
-        {/* Seller Actions */}
-        {isOwner && item.bids.length > 0 && item.status === 'available' && (
-          <View style={[commonStyles.card, { marginBottom: 20 }]}>
-            <Text style={[commonStyles.subtitle, { marginBottom: 16 }]}>
-              Bids ({item.bids.length})
+        {/* Bid Bottom Sheet */}
+        <SimpleBottomSheet
+          isVisible={showBidSheet}
+          onClose={() => setShowBidSheet(false)}
+        >
+          <View style={{ padding: 20 }}>
+            <Text style={[commonStyles.subtitle, { textAlign: 'center', marginBottom: 20 }]}>
+              Place Bid
             </Text>
-            
-            {item.bids
-              .sort((a, b) => b.amount - a.amount)
-              .map((bid) => (
-                <View
-                  key={bid.id}
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    paddingVertical: 12,
-                    borderBottomWidth: 1,
-                    borderBottomColor: colors.border,
-                  }}
-                >
-                  <View style={{ flex: 1 }}>
-                    <Text style={commonStyles.text}>
-                      {bid.bidderUsername}
-                    </Text>
-                    <Text style={commonStyles.caption}>
-                      {formatDate(bid.createdAt)}
-                    </Text>
-                  </View>
-                  
-                  <Text style={[commonStyles.text, { 
-                    fontWeight: '600',
-                    marginRight: 12 
-                  }]}>
-                    ${bid.amount}
-                  </Text>
-                  
-                  <TouchableOpacity
-                    style={[buttonStyles.primary, { paddingHorizontal: 16 }]}
-                    onPress={() => handleAcceptBid(bid.id, bid.amount, bid.bidderUsername)}
-                  >
-                    <Text style={buttonStyles.primaryText}>Accept</Text>
-                  </TouchableOpacity>
-                </View>
-              ))}
-          </View>
-        )}
-
-        {/* Status Messages */}
-        {!canBuy && !canBid && !isOwner && (
-          <View style={[commonStyles.card, { marginBottom: 20 }]}>
-            <View style={{
-              padding: 16,
-              backgroundColor: colors.background,
-              borderRadius: 12,
-              alignItems: 'center',
-            }}>
-              <Icon 
-                name={item.status === 'sold' ? 'check-circle' : 'x-circle'} 
-                size={32} 
-                color={item.status === 'sold' ? colors.success : colors.error} 
-              />
-              <Text style={[commonStyles.text, { 
-                textAlign: 'center', 
-                marginTop: 8 
-              }]}>
-                {item.status === 'sold' ? 'This item has been sold' : 'This item is no longer available'}
+            <Text style={[commonStyles.textSecondary, { marginBottom: 8 }]}>
+              Item: {item.title}
+            </Text>
+            <Text style={[commonStyles.textSecondary, { marginBottom: 16 }]}>
+              Asking price: ${item.price}
+              {highestBid > 0 && ` • Highest bid: $${highestBid}`}
+            </Text>
+            <TextInput
+              style={commonStyles.input}
+              placeholder="Enter bid amount"
+              value={bidAmount}
+              onChangeText={setBidAmount}
+              keyboardType="numeric"
+              autoFocus
+            />
+            <Text style={[commonStyles.textSecondary, { marginBottom: 16 }]}>
+              Available balance: ${authState.user?.balance.toFixed(2) || '0.00'}
+            </Text>
+            <TouchableOpacity
+              style={buttonStyles.primary}
+              onPress={handlePlaceBid}
+            >
+              <Text style={[buttonStyles.text, buttonStyles.primaryText]}>
+                Place Bid
               </Text>
-            </View>
+            </TouchableOpacity>
           </View>
-        )}
-
-        {isOwner && (
-          <View style={[commonStyles.card, { marginBottom: 20 }]}>
-            <View style={{
-              padding: 16,
-              backgroundColor: colors.primary + '20',
-              borderRadius: 12,
-              alignItems: 'center',
-            }}>
-              <Icon name="user" size={32} color={colors.primary} />
-              <Text style={[commonStyles.text, { 
-                textAlign: 'center', 
-                marginTop: 8,
-                color: colors.primary 
-              }]}>
-                This is your listing
-              </Text>
-            </View>
-          </View>
-        )}
-      </ScrollView>
+        </SimpleBottomSheet>
+      </View>
     </SafeAreaView>
   );
 }

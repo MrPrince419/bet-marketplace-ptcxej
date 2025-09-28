@@ -12,8 +12,9 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Link, router } from 'expo-router';
-import { useAuth } from '../../hooks/useAuth';
 import { commonStyles, colors, buttonStyles } from '../../styles/commonStyles';
+import { useAuth } from '../../hooks/useAuth';
+import LoadingSpinner from '../../components/LoadingSpinner';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
@@ -22,82 +23,113 @@ export default function LoginScreen() {
   const { login } = useAuth();
 
   const handleLogin = async () => {
-    if (!email || !password) {
-      Alert.alert('Error', 'Please fill in all fields');
+    if (!email.trim() || !password.trim()) {
+      Alert.alert('Missing Information', 'Please enter both email and password');
       return;
     }
 
     setLoading(true);
-    const success = await login(email, password);
-    setLoading(false);
-
-    if (success) {
-      router.replace('/main');
-    } else {
-      Alert.alert('Error', 'Invalid email or password');
+    try {
+      const success = await login(email.trim(), password);
+      if (success) {
+        router.replace('/main');
+      } else {
+        Alert.alert('Login Failed', 'Invalid email or password. Try using one of the demo accounts:\n\n• alice@demo.com\n• bob@demo.com\n• charlie@demo.com');
+      }
+    } catch (error) {
+      console.log('Login error:', error);
+      Alert.alert('Error', 'An error occurred during login');
+    } finally {
+      setLoading(false);
     }
   };
 
+  const fillDemoAccount = () => {
+    setEmail('alice@demo.com');
+    setPassword('demo123');
+  };
+
+  if (loading) {
+    return <LoadingSpinner message="Logging in..." />;
+  }
+
   return (
-    <SafeAreaView style={commonStyles.container}>
+    <SafeAreaView style={commonStyles.wrapper}>
       <KeyboardAvoidingView
+        style={commonStyles.container}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={{ flex: 1 }}
       >
         <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
-          <View style={[commonStyles.content, { justifyContent: 'center' }]}>
-            <View style={{ marginBottom: 40 }}>
-              <Text style={commonStyles.title}>Welcome Back</Text>
+          <View style={[commonStyles.content, { justifyContent: 'center', flex: 1 }]}>
+            <View style={{ alignItems: 'center', marginBottom: 48 }}>
+              <Text style={[commonStyles.title, { fontSize: 32, marginBottom: 8 }]}>
+                Welcome Back
+              </Text>
               <Text style={commonStyles.textSecondary}>
-                Sign in to your account to continue
+                Sign in to your account
               </Text>
             </View>
 
-            <View style={{ marginBottom: 24 }}>
-              <Text style={[commonStyles.text, { marginBottom: 8 }]}>Email</Text>
+            <View style={commonStyles.section}>
               <TextInput
                 style={commonStyles.input}
+                placeholder="Email"
                 value={email}
                 onChangeText={setEmail}
-                placeholder="Enter your email"
                 keyboardType="email-address"
                 autoCapitalize="none"
                 autoCorrect={false}
               />
-            </View>
 
-            <View style={{ marginBottom: 32 }}>
-              <Text style={[commonStyles.text, { marginBottom: 8 }]}>Password</Text>
               <TextInput
                 style={commonStyles.input}
+                placeholder="Password"
                 value={password}
                 onChangeText={setPassword}
-                placeholder="Enter your password"
                 secureTextEntry
                 autoCapitalize="none"
-                autoCorrect={false}
               />
+
+              <TouchableOpacity
+                style={buttonStyles.primary}
+                onPress={handleLogin}
+                disabled={loading}
+              >
+                <Text style={[buttonStyles.text, buttonStyles.primaryText]}>
+                  Sign In
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[buttonStyles.secondary, { marginTop: 12 }]}
+                onPress={fillDemoAccount}
+              >
+                <Text style={[buttonStyles.text, buttonStyles.secondaryText]}>
+                  Try Demo Account
+                </Text>
+              </TouchableOpacity>
             </View>
 
-            <TouchableOpacity
-              style={[buttonStyles.primary, { marginBottom: 16 }]}
-              onPress={handleLogin}
-              disabled={loading}
-            >
-              <Text style={[buttonStyles.text, buttonStyles.primaryText]}>
-                {loading ? 'Signing In...' : 'Sign In'}
+            <View style={{ alignItems: 'center', marginTop: 32 }}>
+              <Text style={commonStyles.textSecondary}>
+                Don&apos;t have an account?{' '}
+                <Link href="/auth/register" style={{ color: colors.primary, fontWeight: '600' }}>
+                  Sign up
+                </Link>
               </Text>
-            </TouchableOpacity>
+            </View>
 
-            <View style={[commonStyles.row, { justifyContent: 'center' }]}>
-              <Text style={commonStyles.textSecondary}>Don&apos;t have an account? </Text>
-              <Link href="/auth/register" asChild>
-                <TouchableOpacity>
-                  <Text style={[commonStyles.text, { color: colors.primary }]}>
-                    Sign Up
-                  </Text>
-                </TouchableOpacity>
-              </Link>
+            {/* Demo Info */}
+            <View style={[commonStyles.card, { marginTop: 32, backgroundColor: colors.backgroundAlt }]}>
+              <Text style={[commonStyles.text, { fontWeight: '600', marginBottom: 8 }]}>
+                Demo Accounts Available:
+              </Text>
+              <Text style={commonStyles.textSecondary}>
+                • alice@demo.com{'\n'}
+                • bob@demo.com{'\n'}
+                • charlie@demo.com{'\n'}
+                (Any password works)
+              </Text>
             </View>
           </View>
         </ScrollView>
